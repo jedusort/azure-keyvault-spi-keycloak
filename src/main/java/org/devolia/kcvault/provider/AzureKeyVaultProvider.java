@@ -1,6 +1,9 @@
 package org.devolia.kcvault.provider;
 
+import com.azure.core.exception.HttpResponseException;
+import com.azure.core.exception.ResourceNotFoundException;
 import com.azure.security.keyvault.secrets.SecretClient;
+import com.azure.security.keyvault.secrets.models.KeyVaultSecret;
 import com.github.benmanes.caffeine.cache.Cache;
 import org.devolia.kcvault.auth.CredentialResolver;
 import org.devolia.kcvault.cache.CacheConfig;
@@ -103,43 +106,56 @@ public class AzureKeyVaultProvider implements VaultProvider {
     final String secretName = sanitizeSecretName(vaultSecretId);
     logger.debug("Retrieving secret: {} (sanitized: {})", vaultSecretId, secretName);
 
-    // TODO: Implement cache lookup
-    // String cachedSecret = secretCache.getIfPresent(secretName);
-    // if (cachedSecret != null) {
-    //     logger.debug("Secret found in cache: {}", maskSecret(secretName));
-    //     metrics.incrementCacheHit();
-    //     return cachedSecret;
-    // }
+    // Check cache first
+    String cachedSecret = secretCache.getIfPresent(secretName);
+    if (cachedSecret != null) {
+      logger.debug("Secret found in cache: {}", maskSecret(secretName));
+      metrics.incrementCacheHit();
+      return new DefaultVaultRawSecret(cachedSecret);
+    }
 
-    // TODO: Implement Azure Key Vault retrieval
-    // long startTime = System.nanoTime();
-    // try {
-    //     KeyVaultSecret secret = secretClient.getSecret(secretName);
-    //     String secretValue = secret.getValue();
-    //
-    //     // Cache the successful result
-    //     secretCache.put(secretName, secretValue);
-    //
-    //     metrics.recordSuccess(System.nanoTime() - startTime);
-    //     logger.debug("Successfully retrieved and cached secret: {}", maskSecret(secretName));
-    //
-    //     return secretValue;
-    //
-    // } catch (ResourceNotFoundException e) {
-    //     metrics.recordNotFound(System.nanoTime() - startTime);
-    //     logger.debug("Secret not found in Azure Key Vault: {}", maskSecret(secretName));
-    //     return null;
-    //
-    // } catch (Exception e) {
-    //     metrics.recordError(System.nanoTime() - startTime);
-    //     logger.error("Failed to retrieve secret from Azure Key Vault: {}",
-    // maskSecret(secretName), e);
-    //     throw new RuntimeException("Error retrieving secret from Azure Key Vault", e);
-    // }
+    // Record cache miss
+    metrics.incrementCacheMiss();
 
-    // STUB: Return null for now
-    logger.info("STUB: obtainSecret called for '{}' - returning null", maskSecret(secretName));
-    return null;
+    // Retrieve from Azure Key Vault
+    long startTime = System.nanoTime();
+    try {
+      KeyVaultSecret secret = secretClient.getSecret(secretName);
+      String secretValue = secret.getValue();
+
+      // Cache the successful result
+      secretCache.put(secretName, secretValue);
+
+      metrics.recordSuccess(System.nanoTime() - startTime);
+      logger.debug("Successfully retrieved and cached secret: {}", maskSecret(secretName));
+
+      return new DefaultVaultRawSecret(secretValue);
+
+    } catch (ResourceNotFoundException e) {
+      metrics.recordNotFound(System.nanoTime() - startTime);
+      logger.debug("Secret not found in Azure Key Vault: {}", maskSecret(secretName));
+      return null;
+
+    } catch (HttpResponseException e) {
+      if (e.getResponse().getStatusCode() == 404) {
+        metrics.recordNotFound(System.nanoTime() - startTime);
+        logger.debug("Secret not found in Azure Key Vault (404): {}", maskSecret(secretName));
+        return null;
+      } else {
+        metrics.recordError(System.nanoTime() - startTime);
+        logger.error(
+            "HTTP error retrieving secret from Azure Key Vault: {} (status: {})",
+            maskSecret(secretName),
+            e.getResponse().getStatusCode(),
+            e);
+        throw new RuntimeException("Error retrieving secret from Azure Key Vault", e);
+      }
+
+    } catch (Exception e) {
+      metrics.recordError(System.nanoTime() - startTime);
+      logger.error("Failed to retrieve secret from Azure Key Vault: {}", maskSecret(secretName), e);
+      throw new RuntimeException("Error retrieving secret from Azure Key Vault", e);
+    }
   }
 
   /**
