@@ -53,8 +53,8 @@ public class CacheConfig {
    *
    * @return configured cache instance
    */
-  public Cache<String, String> buildCache() {
-    Cache<String, String> cache =
+  public Cache<String, CachedSecret> buildCache() {
+    Cache<String, CachedSecret> cache =
         Caffeine.newBuilder()
             .maximumSize(cacheMaxSize)
             .expireAfterWrite(Duration.ofSeconds(cacheTtl))
