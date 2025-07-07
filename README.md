@@ -10,7 +10,8 @@ Production-ready `VaultProvider` for **Keycloak 26+** that retrieves secrets dir
 - 🔐 **Azure Key Vault integration** - Seamless secret retrieval from Azure Key Vault
 - 🚀 **Multiple auth methods** - Managed Identity (preferred) or Service Principal
 - ⚡ **Intelligent caching** - Configurable TTL and LRU cache with Caffeine
-- 📊 **Observability** - Micrometer metrics for Prometheus monitoring
+- 🛡️ **Resilience patterns** - Retry logic, circuit breaker, and advanced error handling
+- 📊 **Observability** - Micrometer metrics for Prometheus monitoring with error categorization
 - 🧪 **Testing support** - Comprehensive unit tests and Testcontainers integration
 - 🐳 **Docker ready** - Multistage Docker image for easy deployment
 - ☕ **Java 17 compatible** - Modern Java with Google Java Style
@@ -31,6 +32,15 @@ spi-vault-azure-kv-name=my-vault
 # Optional: Cache settings
 spi-vault-azure-kv-cache-ttl=60      # Cache TTL in seconds (default: 60)
 spi-vault-azure-kv-cache-max=1000    # Max cache entries (default: 1000)
+
+# Optional: Resilience patterns (NEW in v1.1.0)
+spi-vault-azure-kv-retry-max-attempts=3                    # Max retry attempts (default: 3)
+spi-vault-azure-kv-retry-base-delay=1000                  # Base delay in ms (default: 1000)
+spi-vault-azure-kv-circuit-breaker-enabled=true           # Enable circuit breaker (default: true)
+spi-vault-azure-kv-circuit-breaker-failure-threshold=5    # Failure threshold (default: 5)
+spi-vault-azure-kv-circuit-breaker-recovery-timeout=30000 # Recovery timeout in ms (default: 30000)
+spi-vault-azure-kv-connection-timeout=5000                # Connection timeout in ms (default: 5000)
+spi-vault-azure-kv-read-timeout=10000                     # Read timeout in ms (default: 10000)
 ```
 
 ### 2. Authentication
@@ -81,9 +91,23 @@ smtp-password=${vault.smtp-credentials}
 
 The provider exposes Micrometer metrics:
 
+### Core Metrics
 - `keycloak_vault_azure_kv_requests_total{status="success|error|not_found"}` - Request counters
 - `keycloak_vault_azure_kv_latency_seconds` - Request latency histogram
 - `keycloak_vault_azure_kv_cache_operations_total{operation="hit|miss"}` - Cache metrics
+
+### Enhanced Error Metrics (NEW in v1.1.0)
+- `keycloak_vault_azure_kv_requests_total{status="error", error_category="..."}` - Categorized errors
+- `keycloak_vault_azure_kv_retry_attempts_total{attempt="1|2|3", error_category="..."}` - Retry tracking
+- `keycloak_vault_azure_kv_circuit_breaker_state{state="closed|open|half_open"}` - Circuit breaker state
+
+### Error Categories
+- `timeout` - Network timeouts and connection issues
+- `rate_limited` - HTTP 429 responses from Azure
+- `server_error` - HTTP 5xx responses from Azure
+- `authentication` - Authentication and authorization failures
+- `not_found` - Secret not found (404)
+- `network` - DNS and network connectivity issues
 
 ## 🏗️ Architecture
 
