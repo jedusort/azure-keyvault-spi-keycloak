@@ -4,9 +4,12 @@ import com.azure.core.exception.HttpResponseException;
 import com.azure.core.exception.ResourceNotFoundException;
 import com.azure.security.keyvault.secrets.SecretClient;
 import com.azure.security.keyvault.secrets.models.KeyVaultSecret;
+import com.azure.security.keyvault.secrets.models.SecretProperties;
 import com.github.benmanes.caffeine.cache.Cache;
+import java.time.OffsetDateTime;
 import org.devolia.kcvault.auth.CredentialResolver;
 import org.devolia.kcvault.cache.CacheConfig;
+import org.devolia.kcvault.cache.CachedSecret;
 import org.devolia.kcvault.metrics.AzureKeyVaultMetrics;
 import org.keycloak.vault.VaultProvider;
 import org.keycloak.vault.VaultRawSecret;
@@ -42,7 +45,7 @@ public class AzureKeyVaultProvider implements VaultProvider {
   private static final Logger logger = LoggerFactory.getLogger(AzureKeyVaultProvider.class);
 
   private final SecretClient secretClient;
-  private final Cache<String, String> secretCache;
+  private final Cache<String, CachedSecret> secretCache;
   private final AzureKeyVaultMetrics metrics;
   private final String vaultName;
 
@@ -107,11 +110,15 @@ public class AzureKeyVaultProvider implements VaultProvider {
     logger.debug("Retrieving secret: {} (sanitized: {})", vaultSecretId, secretName);
 
     // Check cache first
-    String cachedSecret = secretCache.getIfPresent(secretName);
-    if (cachedSecret != null) {
+    CachedSecret cachedSecret = secretCache.getIfPresent(secretName);
+    if (cachedSecret != null && cachedSecret.isValid()) {
       logger.debug("Secret found in cache: {}", maskSecret(secretName));
       metrics.incrementCacheHit();
-      return new DefaultVaultRawSecret(cachedSecret);
+      return new DefaultVaultRawSecret(cachedSecret.getValue());
+    } else if (cachedSecret != null && cachedSecret.isExpired()) {
+      // Remove expired secret from cache
+      secretCache.invalidate(secretName);
+      logger.debug("Removed expired secret from cache: {}", maskSecret(secretName));
     }
 
     // Record cache miss
@@ -122,12 +129,45 @@ public class AzureKeyVaultProvider implements VaultProvider {
     try {
       KeyVaultSecret secret = secretClient.getSecret(secretName);
       String secretValue = secret.getValue();
+      SecretProperties properties = secret.getProperties();
 
-      // Cache the successful result
-      secretCache.put(secretName, secretValue);
+      // Check if secret is expired or not yet valid (only if properties are available)
+      if (properties != null) {
+        OffsetDateTime now = OffsetDateTime.now();
+        if (isSecretExpired(properties, now)) {
+          metrics.recordNotFound(System.nanoTime() - startTime);
+          logger.debug("Secret is expired: {}", maskSecret(secretName));
+          return null;
+        }
+
+        if (isSecretNotYetValid(properties, now)) {
+          metrics.recordNotFound(System.nanoTime() - startTime);
+          logger.debug("Secret is not yet valid: {}", maskSecret(secretName));
+          return null;
+        }
+
+        if (isSecretDisabled(properties)) {
+          metrics.recordNotFound(System.nanoTime() - startTime);
+          logger.debug("Secret is disabled: {}", maskSecret(secretName));
+          return null;
+        }
+      }
+
+      // Cache the successful result with expiration metadata
+      CachedSecret cachedSecretObj =
+          new CachedSecret(secretValue, properties != null ? properties.getExpiresOn() : null);
+      secretCache.put(secretName, cachedSecretObj);
 
       metrics.recordSuccess(System.nanoTime() - startTime);
-      logger.debug("Successfully retrieved and cached secret: {}", maskSecret(secretName));
+      if (properties != null) {
+        logger.debug(
+            "Successfully retrieved and cached secret: {} (version: {}, expires: {})",
+            maskSecret(secretName),
+            properties.getVersion(),
+            properties.getExpiresOn());
+      } else {
+        logger.debug("Successfully retrieved and cached secret: {}", maskSecret(secretName));
+      }
 
       return new DefaultVaultRawSecret(secretValue);
 
@@ -226,5 +266,40 @@ public class AzureKeyVaultProvider implements VaultProvider {
       return "***";
     }
     return secretName.substring(0, 2) + "***" + secretName.substring(secretName.length() - 1);
+  }
+
+  /**
+   * Checks if a secret is expired based on its expiration metadata.
+   *
+   * @param properties the secret properties
+   * @param now the current time
+   * @return true if the secret is expired
+   */
+  private boolean isSecretExpired(SecretProperties properties, OffsetDateTime now) {
+    OffsetDateTime expiresOn = properties.getExpiresOn();
+    return expiresOn != null && now.isAfter(expiresOn);
+  }
+
+  /**
+   * Checks if a secret is not yet valid based on its activation metadata.
+   *
+   * @param properties the secret properties
+   * @param now the current time
+   * @return true if the secret is not yet valid
+   */
+  private boolean isSecretNotYetValid(SecretProperties properties, OffsetDateTime now) {
+    OffsetDateTime notBefore = properties.getNotBefore();
+    return notBefore != null && now.isBefore(notBefore);
+  }
+
+  /**
+   * Checks if a secret is disabled.
+   *
+   * @param properties the secret properties
+   * @return true if the secret is disabled
+   */
+  private boolean isSecretDisabled(SecretProperties properties) {
+    Boolean enabled = properties.isEnabled();
+    return enabled != null && !enabled;
   }
 }
