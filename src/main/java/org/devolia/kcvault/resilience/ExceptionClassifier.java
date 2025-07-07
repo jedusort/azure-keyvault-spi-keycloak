@@ -59,13 +59,19 @@ public class ExceptionClassifier {
 
     // Azure HTTP response exceptions
     if (exception instanceof HttpResponseException httpException) {
-      int statusCode = httpException.getResponse().getStatusCode();
-      boolean isTransient = statusCode == 429 || statusCode == 503 || statusCode >= 500;
-      logger.debug(
-          "HTTP exception classified as {}: status={}",
-          isTransient ? "transient" : "permanent",
-          statusCode);
-      return isTransient;
+      if (httpException.getResponse() != null) {
+        int statusCode = httpException.getResponse().getStatusCode();
+        boolean isTransient = statusCode == 429 || statusCode == 503 || statusCode >= 500;
+        logger.debug(
+            "HTTP exception classified as {}: status={}",
+            isTransient ? "transient" : "permanent",
+            statusCode);
+        return isTransient;
+      } else {
+        // If response is null, treat as unknown/transient to be safe
+        logger.debug("HTTP exception with null response classified as transient");
+        return true;
+      }
     }
 
     // Check nested causes
@@ -112,14 +118,20 @@ public class ExceptionClassifier {
 
     // Azure HTTP response exceptions
     if (exception instanceof HttpResponseException httpException) {
-      int statusCode = httpException.getResponse().getStatusCode();
-      boolean isPermanent =
-          statusCode == 400 || statusCode == 401 || statusCode == 403 || statusCode == 404;
-      logger.debug(
-          "HTTP exception classified as {}: status={}",
-          isPermanent ? "permanent" : "transient",
-          statusCode);
-      return isPermanent;
+      if (httpException.getResponse() != null) {
+        int statusCode = httpException.getResponse().getStatusCode();
+        boolean isPermanent =
+            statusCode == 400 || statusCode == 401 || statusCode == 403 || statusCode == 404;
+        logger.debug(
+            "HTTP exception classified as {}: status={}",
+            isPermanent ? "permanent" : "transient",
+            statusCode);
+        return isPermanent;
+      } else {
+        // If response is null, treat as non-permanent (unknown error)
+        logger.debug("HTTP exception with null response classified as non-permanent");
+        return false;
+      }
     }
 
     // Check nested causes
@@ -156,12 +168,17 @@ public class ExceptionClassifier {
     }
 
     if (exception instanceof HttpResponseException httpException) {
-      int statusCode = httpException.getResponse().getStatusCode();
-      // Don't count 404 or auth errors as circuit breaker failures
-      if (statusCode == 404 || statusCode == 401 || statusCode == 403) {
-        return false;
+      if (httpException.getResponse() != null) {
+        int statusCode = httpException.getResponse().getStatusCode();
+        // Don't count 404 or auth errors as circuit breaker failures
+        if (statusCode == 404 || statusCode == 401 || statusCode == 403) {
+          return false;
+        }
+        return true; // All other HTTP errors count as failures
+      } else {
+        // If response is null, count as circuit breaker failure to be safe
+        return true;
       }
-      return true; // All other HTTP errors count as failures
     }
 
     // Authentication errors are configuration issues, not service failures
@@ -193,16 +210,20 @@ public class ExceptionClassifier {
     }
 
     if (exception instanceof HttpResponseException httpException) {
-      int statusCode = httpException.getResponse().getStatusCode();
-      return switch (statusCode) {
-        case 400 -> "bad_request";
-        case 401 -> "unauthorized";
-        case 403 -> "forbidden";
-        case 404 -> "not_found";
-        case 429 -> "rate_limited";
-        case 503 -> "service_unavailable";
-        default -> statusCode >= 500 ? "server_error" : "client_error";
-      };
+      if (httpException.getResponse() != null) {
+        int statusCode = httpException.getResponse().getStatusCode();
+        return switch (statusCode) {
+          case 400 -> "bad_request";
+          case 401 -> "unauthorized";
+          case 403 -> "forbidden";
+          case 404 -> "not_found";
+          case 429 -> "rate_limited";
+          case 503 -> "service_unavailable";
+          default -> statusCode >= 500 ? "server_error" : "client_error";
+        };
+      } else {
+        return "http_error";
+      }
     }
 
     if (exception instanceof SocketTimeoutException || exception instanceof TimeoutException) {
