@@ -6,11 +6,18 @@ import com.azure.security.keyvault.secrets.SecretClient;
 import com.azure.security.keyvault.secrets.models.KeyVaultSecret;
 import com.azure.security.keyvault.secrets.models.SecretProperties;
 import com.github.benmanes.caffeine.cache.Cache;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import io.github.resilience4j.retry.Retry;
+import io.github.resilience4j.retry.RetryConfig;
 import java.time.OffsetDateTime;
+import java.util.function.Supplier;
 import org.devolia.kcvault.auth.CredentialResolver;
 import org.devolia.kcvault.cache.CacheConfig;
 import org.devolia.kcvault.cache.CachedSecret;
 import org.devolia.kcvault.metrics.AzureKeyVaultMetrics;
+import org.devolia.kcvault.resilience.ExceptionClassifier;
+import org.devolia.kcvault.resilience.ResilienceConfig;
 import org.keycloak.vault.VaultProvider;
 import org.keycloak.vault.VaultRawSecret;
 import org.slf4j.Logger;
@@ -48,9 +55,102 @@ public class AzureKeyVaultProvider implements VaultProvider {
   private final Cache<String, CachedSecret> secretCache;
   private final AzureKeyVaultMetrics metrics;
   private final String vaultName;
+  private final ResilienceConfig resilienceConfig;
+  private final Retry retry;
+  private final CircuitBreaker circuitBreaker;
 
   /**
    * Constructor for CDI injection.
+   *
+   * @param credentialResolver resolver for Azure credentials
+   * @param cacheConfig cache configuration
+   * @param metrics metrics collector
+   * @param resilienceConfig resilience patterns configuration
+   */
+  public AzureKeyVaultProvider(
+      CredentialResolver credentialResolver,
+      CacheConfig cacheConfig,
+      AzureKeyVaultMetrics metrics,
+      ResilienceConfig resilienceConfig) {
+
+    this.vaultName = cacheConfig.getVaultName();
+    this.metrics = metrics;
+    this.secretCache = cacheConfig.buildCache();
+    this.resilienceConfig = resilienceConfig;
+
+    // Initialize Azure Key Vault client
+    this.secretClient = credentialResolver.createSecretClient(vaultName);
+
+    // Initialize retry configuration
+    RetryConfig retryConfig =
+        RetryConfig.custom()
+            .maxAttempts(resilienceConfig.getRetryMaxAttempts())
+            .waitDuration(resilienceConfig.getRetryBaseDelay())
+            .retryOnException(ExceptionClassifier::isTransientFailure)
+            .build();
+
+    this.retry = Retry.of("azure-keyvault-" + vaultName, retryConfig);
+
+    // Add retry event listeners for metrics
+    retry
+        .getEventPublisher()
+        .onRetry(
+            event -> {
+              String errorCategory = ExceptionClassifier.getErrorCategory(event.getLastThrowable());
+              metrics.recordRetryAttempt(event.getNumberOfRetryAttempts(), errorCategory);
+              logger.debug(
+                  "Retry attempt {} for vault operation, error: {}",
+                  event.getNumberOfRetryAttempts(),
+                  errorCategory);
+            });
+
+    // Initialize circuit breaker configuration
+    if (resilienceConfig.isCircuitBreakerEnabled()) {
+      CircuitBreakerConfig circuitBreakerConfig =
+          CircuitBreakerConfig.custom()
+              .failureRateThreshold(resilienceConfig.getCircuitBreakerFailureThreshold())
+              .waitDurationInOpenState(resilienceConfig.getCircuitBreakerRecoveryTimeout())
+              .recordException(ExceptionClassifier::isCircuitBreakerFailure)
+              .slidingWindowSize(10)
+              .minimumNumberOfCalls(5)
+              .build();
+
+      this.circuitBreaker = CircuitBreaker.of("azure-keyvault-" + vaultName, circuitBreakerConfig);
+
+      // Add circuit breaker event listeners for metrics
+      circuitBreaker
+          .getEventPublisher()
+          .onStateTransition(
+              event -> {
+                String fromState = event.getStateTransition().getFromState().name().toLowerCase();
+                String toState = event.getStateTransition().getToState().name().toLowerCase();
+                metrics.recordCircuitBreakerState(toState);
+                logger.info(
+                    "Circuit breaker state transition: {} -> {} for vault: {}",
+                    fromState,
+                    toState,
+                    vaultName);
+              });
+    } else {
+      this.circuitBreaker = null;
+      logger.debug("Circuit breaker disabled for vault: {}", vaultName);
+    }
+
+    logger.info(
+        "Initialized Azure Key Vault provider for vault: {} with resilience patterns", vaultName);
+    logger.debug(
+        "Cache configuration - TTL: {}s, Max entries: {}",
+        cacheConfig.getCacheTtl(),
+        cacheConfig.getCacheMaxSize());
+    logger.debug(
+        "Resilience configuration - Retry: max={}, baseDelay={}ms; CircuitBreaker: enabled={}",
+        resilienceConfig.getRetryMaxAttempts(),
+        resilienceConfig.getRetryBaseDelay().toMillis(),
+        resilienceConfig.isCircuitBreakerEnabled());
+  }
+
+  /**
+   * Constructor for CDI injection with default resilience configuration.
    *
    * @param credentialResolver resolver for Azure credentials
    * @param cacheConfig cache configuration
@@ -60,39 +160,29 @@ public class AzureKeyVaultProvider implements VaultProvider {
       CredentialResolver credentialResolver,
       CacheConfig cacheConfig,
       AzureKeyVaultMetrics metrics) {
-
-    this.vaultName = cacheConfig.getVaultName();
-    this.metrics = metrics;
-    this.secretCache = cacheConfig.buildCache();
-
-    // Initialize Azure Key Vault client
-    this.secretClient = credentialResolver.createSecretClient(vaultName);
-
-    logger.info("Initialized Azure Key Vault provider for vault: {}", vaultName);
-    logger.debug(
-        "Cache configuration - TTL: {}s, Max entries: {}",
-        cacheConfig.getCacheTtl(),
-        cacheConfig.getCacheMaxSize());
+    this(credentialResolver, cacheConfig, metrics, ResilienceConfig.defaultConfig());
   }
 
   /**
-   * Retrieves a secret from Azure Key Vault with caching support.
+   * Retrieves a secret from Azure Key Vault with caching support and resilience patterns.
    *
    * <p>The method follows this flow:
    *
    * <ol>
    *   <li>Check local cache for the secret
-   *   <li>If not cached, retrieve from Azure Key Vault
+   *   <li>If not cached, retrieve from Azure Key Vault with retry and circuit breaker protection
    *   <li>Update metrics (success/error counters and latency)
    *   <li>Cache the result (only successful retrievals)
    *   <li>Return the secret value or null if not found
    * </ol>
    *
-   * <p>Handles Azure Key Vault exceptions gracefully:
+   * <p>Resilience patterns applied:
    *
    * <ul>
-   *   <li>404 Not Found → returns null (secret doesn't exist)
-   *   <li>Other exceptions → logged and re-thrown as VaultProvider exceptions
+   *   <li>Retry logic with exponential backoff for transient failures
+   *   <li>Circuit breaker to prevent cascading failures
+   *   <li>Comprehensive exception mapping with proper error categorization
+   *   <li>Enhanced metrics for different error types
    * </ul>
    *
    * @param vaultSecretId the secret identifier (name) in Azure Key Vault
@@ -124,8 +214,55 @@ public class AzureKeyVaultProvider implements VaultProvider {
     // Record cache miss
     metrics.incrementCacheMiss();
 
-    // Retrieve from Azure Key Vault
+    // Retrieve from Azure Key Vault with resilience patterns
     long startTime = System.nanoTime();
+
+    // Create the supplier for the vault operation
+    Supplier<VaultRawSecret> vaultOperation = () -> retrieveSecretFromVault(secretName, startTime);
+
+    try {
+      // Apply circuit breaker if enabled
+      if (circuitBreaker != null) {
+        vaultOperation = CircuitBreaker.decorateSupplier(circuitBreaker, vaultOperation);
+      }
+
+      // Apply retry logic
+      vaultOperation = Retry.decorateSupplier(retry, vaultOperation);
+
+      // Execute the operation
+      return vaultOperation.get();
+
+    } catch (Exception e) {
+      long latency = System.nanoTime() - startTime;
+      String errorCategory = ExceptionClassifier.getErrorCategory(e);
+
+      // Enhanced error handling with categorization
+      if (e instanceof ResourceNotFoundException
+          || (e instanceof HttpResponseException httpEx
+              && httpEx.getResponse().getStatusCode() == 404)) {
+        metrics.recordNotFound(latency);
+        logger.debug("Secret not found in Azure Key Vault: {}", maskSecret(secretName));
+        return null;
+      }
+
+      // Record error with category
+      metrics.recordError(latency, errorCategory);
+      logger.error(
+          "Failed to retrieve secret from Azure Key Vault: {} (category: {})",
+          maskSecret(secretName),
+          errorCategory,
+          e);
+
+      throw new RuntimeException(
+          "Error retrieving secret from Azure Key Vault: " + errorCategory, e);
+    }
+  }
+
+  /**
+   * Core method to retrieve secret from vault without resilience patterns. This is wrapped by
+   * resilience decorators in obtainSecret().
+   */
+  private VaultRawSecret retrieveSecretFromVault(String secretName, long operationStartTime) {
     try {
       KeyVaultSecret secret = secretClient.getSecret(secretName);
       String secretValue = secret.getValue();
@@ -135,19 +272,19 @@ public class AzureKeyVaultProvider implements VaultProvider {
       if (properties != null) {
         OffsetDateTime now = OffsetDateTime.now();
         if (isSecretExpired(properties, now)) {
-          metrics.recordNotFound(System.nanoTime() - startTime);
+          metrics.recordNotFound(System.nanoTime() - operationStartTime);
           logger.debug("Secret is expired: {}", maskSecret(secretName));
           return null;
         }
 
         if (isSecretNotYetValid(properties, now)) {
-          metrics.recordNotFound(System.nanoTime() - startTime);
+          metrics.recordNotFound(System.nanoTime() - operationStartTime);
           logger.debug("Secret is not yet valid: {}", maskSecret(secretName));
           return null;
         }
 
         if (isSecretDisabled(properties)) {
-          metrics.recordNotFound(System.nanoTime() - startTime);
+          metrics.recordNotFound(System.nanoTime() - operationStartTime);
           logger.debug("Secret is disabled: {}", maskSecret(secretName));
           return null;
         }
@@ -158,7 +295,7 @@ public class AzureKeyVaultProvider implements VaultProvider {
           new CachedSecret(secretValue, properties != null ? properties.getExpiresOn() : null);
       secretCache.put(secretName, cachedSecretObj);
 
-      metrics.recordSuccess(System.nanoTime() - startTime);
+      metrics.recordSuccess(System.nanoTime() - operationStartTime);
       if (properties != null) {
         logger.debug(
             "Successfully retrieved and cached secret: {} (version: {}, expires: {})",
@@ -171,30 +308,9 @@ public class AzureKeyVaultProvider implements VaultProvider {
 
       return new DefaultVaultRawSecret(secretValue);
 
-    } catch (ResourceNotFoundException e) {
-      metrics.recordNotFound(System.nanoTime() - startTime);
-      logger.debug("Secret not found in Azure Key Vault: {}", maskSecret(secretName));
-      return null;
-
-    } catch (HttpResponseException e) {
-      if (e.getResponse().getStatusCode() == 404) {
-        metrics.recordNotFound(System.nanoTime() - startTime);
-        logger.debug("Secret not found in Azure Key Vault (404): {}", maskSecret(secretName));
-        return null;
-      } else {
-        metrics.recordError(System.nanoTime() - startTime);
-        logger.error(
-            "HTTP error retrieving secret from Azure Key Vault: {} (status: {})",
-            maskSecret(secretName),
-            e.getResponse().getStatusCode(),
-            e);
-        throw new RuntimeException("Error retrieving secret from Azure Key Vault", e);
-      }
-
     } catch (Exception e) {
-      metrics.recordError(System.nanoTime() - startTime);
-      logger.error("Failed to retrieve secret from Azure Key Vault: {}", maskSecret(secretName), e);
-      throw new RuntimeException("Error retrieving secret from Azure Key Vault", e);
+      // Let exceptions bubble up to be handled by resilience patterns
+      throw e;
     }
   }
 

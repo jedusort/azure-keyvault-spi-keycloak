@@ -30,6 +30,9 @@
         <!-- Metrics -->
         <micrometer.version>1.13.6</micrometer.version>
         
+        <!-- Resilience -->
+        <resilience4j.version>2.2.0</resilience4j.version>
+        
         <!-- Logging -->
         <slf4j.version>2.0.16</slf4j.version>
         
@@ -87,6 +90,25 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>
             <version>${micrometer.version}</version>
+        </dependency>
+
+        <!-- Resilience -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-retry</artifactId>
+            <version>${resilience4j.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-circuitbreaker</artifactId>
+            <version>${resilience4j.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-micrometer</artifactId>
+            <version>${resilience4j.version}</version>
         </dependency>
 
         <!-- Logging -->
