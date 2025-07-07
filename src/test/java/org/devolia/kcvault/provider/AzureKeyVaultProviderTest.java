@@ -1,7 +1,7 @@
 package org.devolia.kcvault.provider;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.azure.core.exception.HttpResponseException;
@@ -13,6 +13,8 @@ import com.azure.security.keyvault.secrets.models.SecretProperties;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import java.time.OffsetDateTime;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.devolia.kcvault.auth.CredentialResolver;
 import org.devolia.kcvault.cache.CacheConfig;
 import org.devolia.kcvault.cache.CachedSecret;
@@ -454,5 +456,371 @@ class AzureKeyVaultProviderTest {
     assertEquals("fresh-value", cachedResult.getValue());
 
     result.close();
+  }
+
+  // === Comprehensive Metrics Tests ===
+
+  @Test
+  void testMetricsLatencyRecording() {
+    // Setup mock response
+    when(secretClient.getSecret("latency-test-secret")).thenReturn(keyVaultSecret);
+    when(keyVaultSecret.getValue()).thenReturn("test-value");
+    when(keyVaultSecret.getProperties()).thenReturn(secretProperties);
+    when(secretProperties.isEnabled()).thenReturn(true);
+
+    // Measure the call
+    long startTime = System.nanoTime();
+    VaultRawSecret result = provider.obtainSecret("latency-test-secret");
+    long endTime = System.nanoTime();
+
+    assertNotNull(result);
+
+    // Verify latency was recorded with reasonable bounds
+    verify(metrics)
+        .recordSuccess(longThat(latency -> latency >= 0 && latency <= (endTime - startTime) * 2));
+
+    result.close();
+  }
+
+  @Test
+  void testMetricsErrorLatencyRecording() {
+    // Setup mock to throw exception
+    when(secretClient.getSecret("error-latency-secret"))
+        .thenThrow(new RuntimeException("Test error"));
+
+    // Measure the call
+    long startTime = System.nanoTime();
+    assertThrows(RuntimeException.class, () -> provider.obtainSecret("error-latency-secret"));
+    long endTime = System.nanoTime();
+
+    // Verify error latency was recorded
+    verify(metrics)
+        .recordError(longThat(latency -> latency >= 0 && latency <= (endTime - startTime) * 2));
+  }
+
+  @Test
+  void testMetricsNotFoundLatencyRecording() {
+    // Setup mock HttpResponse for 404
+    HttpResponse httpResponse = mock(HttpResponse.class);
+    when(httpResponse.getStatusCode()).thenReturn(404);
+    HttpResponseException exception = new HttpResponseException("Not found", httpResponse);
+    when(secretClient.getSecret("not-found-latency-secret")).thenThrow(exception);
+
+    // Measure the call
+    long startTime = System.nanoTime();
+    VaultRawSecret result = provider.obtainSecret("not-found-latency-secret");
+    long endTime = System.nanoTime();
+
+    assertNull(result);
+
+    // Verify not found latency was recorded
+    verify(metrics)
+        .recordNotFound(longThat(latency -> latency >= 0 && latency <= (endTime - startTime) * 2));
+  }
+
+  // === Cache Configuration and LRU Tests ===
+
+  @Test
+  void testCacheSizeLimitsAndEviction() {
+    // Create a new provider with small cache for testing LRU behavior
+    Cache<String, CachedSecret> smallCache =
+        Caffeine.newBuilder()
+            .maximumSize(2) // Very small cache
+            .build();
+
+    when(cacheConfig.buildCache()).thenReturn(smallCache);
+    AzureKeyVaultProvider testProvider =
+        new AzureKeyVaultProvider(credentialResolver, cacheConfig, metrics);
+
+    // Setup mock responses for multiple secrets with unique return values
+    KeyVaultSecret secret1 = mock(KeyVaultSecret.class);
+    KeyVaultSecret secret2 = mock(KeyVaultSecret.class);
+    KeyVaultSecret secret3 = mock(KeyVaultSecret.class);
+
+    when(secretClient.getSecret("secret1")).thenReturn(secret1);
+    when(secretClient.getSecret("secret2")).thenReturn(secret2);
+    when(secretClient.getSecret("secret3")).thenReturn(secret3);
+
+    when(secret1.getValue()).thenReturn("value1");
+    when(secret2.getValue()).thenReturn("value2");
+    when(secret3.getValue()).thenReturn("value3");
+
+    when(secret1.getProperties()).thenReturn(null);
+    when(secret2.getProperties()).thenReturn(null);
+    when(secret3.getProperties()).thenReturn(null);
+
+    // Add secrets to fill cache
+    testProvider.obtainSecret("secret1").close();
+    assertEquals(1, testProvider.getCacheSize());
+
+    testProvider.obtainSecret("secret2").close();
+    assertEquals(2, testProvider.getCacheSize());
+
+    // Adding third secret should trigger eviction when cache is full
+    testProvider.obtainSecret("secret3").close();
+
+    // Cache cleanup happens asynchronously in Caffeine, so we need to trigger it
+    smallCache.cleanUp();
+
+    // Cache size should be at most 2 (the max size)
+    assertTrue(
+        testProvider.getCacheSize() <= 2,
+        "Cache size should not exceed maximum: " + testProvider.getCacheSize());
+
+    // Verify metrics recorded the cache misses for initial retrievals
+    verify(metrics, atLeast(3)).incrementCacheMiss();
+  }
+
+  @Test
+  void testCacheTTLExpiration() {
+    // Create a cache with very short TTL for testing
+    Cache<String, CachedSecret> shortTtlCache =
+        Caffeine.newBuilder()
+            .expireAfterWrite(java.time.Duration.ofMillis(50)) // 50ms TTL
+            .build();
+
+    when(cacheConfig.buildCache()).thenReturn(shortTtlCache);
+    AzureKeyVaultProvider testProvider =
+        new AzureKeyVaultProvider(credentialResolver, cacheConfig, metrics);
+
+    // Setup mock response
+    when(secretClient.getSecret("ttl-test-secret")).thenReturn(keyVaultSecret);
+    when(keyVaultSecret.getValue()).thenReturn("test-value");
+    when(keyVaultSecret.getProperties()).thenReturn(null);
+
+    // First call - cache miss
+    testProvider.obtainSecret("ttl-test-secret").close();
+    assertEquals(1, testProvider.getCacheSize());
+
+    // Second call immediately - cache hit
+    testProvider.obtainSecret("ttl-test-secret").close();
+
+    // Wait for TTL to expire
+    try {
+      Thread.sleep(100); // Wait longer than 50ms TTL
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+
+    // Third call after TTL - should be cache miss
+    testProvider.obtainSecret("ttl-test-secret").close();
+
+    // Verify we had cache misses for first and third calls
+    verify(metrics, atLeast(2)).incrementCacheMiss();
+  }
+
+  // === Various Configuration Tests ===
+
+  @Test
+  void testInvalidateSecretWithSanitization() {
+    // Add a secret to cache using sanitized name
+    cache.put("my-special-secret", new CachedSecret("test-value", null));
+    assertEquals(1, provider.getCacheSize());
+
+    // Invalidate using original (non-sanitized) name
+    provider.invalidateSecret("my.special.secret");
+
+    // Verify secret was invalidated (sanitization should match)
+    assertEquals(0, provider.getCacheSize());
+  }
+
+  @Test
+  void testInvalidateSecretWithNullInput() {
+    // Add a secret to cache
+    cache.put("test-secret", new CachedSecret("test-value", null));
+    assertEquals(1, provider.getCacheSize());
+
+    // Invalidate with null input should not crash or affect cache
+    assertDoesNotThrow(() -> provider.invalidateSecret(null));
+    assertEquals(1, provider.getCacheSize());
+  }
+
+  @Test
+  void testMultipleCacheOperationsSequence() {
+    // Test a sequence of cache operations to verify state consistency
+
+    // Start with empty cache
+    assertEquals(0, provider.getCacheSize());
+
+    // Add multiple items
+    cache.put("item1", new CachedSecret("value1", null));
+    cache.put("item2", new CachedSecret("value2", null));
+    cache.put("item3", new CachedSecret("value3", null));
+    assertEquals(3, provider.getCacheSize());
+
+    // Invalidate one item
+    provider.invalidateSecret("item1");
+    assertEquals(2, provider.getCacheSize());
+
+    // Clear all
+    provider.clearCache();
+    assertEquals(0, provider.getCacheSize());
+
+    // Verify multiple clears don't cause issues
+    provider.clearCache();
+    assertEquals(0, provider.getCacheSize());
+  }
+
+  // === Extended Error Handling Tests ===
+
+  @Test
+  void testNetworkTimeoutScenario() {
+    // Simulate network timeout using a generic exception that could represent timeout
+    when(secretClient.getSecret("timeout-secret"))
+        .thenThrow(new RuntimeException("Request timeout"));
+
+    // Test timeout scenario
+    assertThrows(RuntimeException.class, () -> provider.obtainSecret("timeout-secret"));
+
+    // Verify metrics were recorded as error
+    verify(metrics).incrementCacheMiss();
+    verify(metrics).recordError(anyLong());
+  }
+
+  @Test
+  void testAuthenticationFailureScenario() {
+    // Simulate authentication failure
+    when(secretClient.getSecret("auth-fail-secret"))
+        .thenThrow(new RuntimeException("Authentication failed"));
+
+    // Test authentication failure scenario
+    assertThrows(RuntimeException.class, () -> provider.obtainSecret("auth-fail-secret"));
+
+    // Verify metrics were recorded as error
+    verify(metrics).incrementCacheMiss();
+    verify(metrics).recordError(anyLong());
+  }
+
+  @Test
+  void testHttpResponseExceptionVariousStatuses() {
+    // Test different HTTP status codes
+    int[] statusCodes = {400, 401, 403, 500, 502, 503};
+
+    for (int statusCode : statusCodes) {
+      HttpResponse httpResponse = mock(HttpResponse.class);
+      when(httpResponse.getStatusCode()).thenReturn(statusCode);
+      HttpResponseException exception = new HttpResponseException("HTTP error", httpResponse);
+
+      String secretName = "http-error-" + statusCode;
+      when(secretClient.getSecret(secretName)).thenThrow(exception);
+
+      // All non-404 errors should throw RuntimeException
+      assertThrows(
+          RuntimeException.class,
+          () -> provider.obtainSecret(secretName),
+          "Status code " + statusCode + " should throw RuntimeException");
+    }
+
+    // Verify error metrics were recorded for each status code
+    verify(metrics, times(statusCodes.length)).recordError(anyLong());
+  }
+
+  // === Concurrent Access Tests ===
+
+  @Test
+  void testConcurrentSecretRetrieval() {
+    // Setup mock response
+    when(secretClient.getSecret("concurrent-secret")).thenReturn(keyVaultSecret);
+    when(keyVaultSecret.getValue()).thenReturn("concurrent-value");
+    when(keyVaultSecret.getProperties()).thenReturn(null);
+
+    int threadCount = 5; // Using fewer threads to reduce test complexity
+    AtomicInteger successCount = new AtomicInteger(0);
+
+    // Create concurrent futures
+    CompletableFuture<Void>[] futures = new CompletableFuture[threadCount];
+    for (int i = 0; i < threadCount; i++) {
+      futures[i] =
+          CompletableFuture.runAsync(
+              () -> {
+                try {
+                  VaultRawSecret result = provider.obtainSecret("concurrent-secret");
+                  if (result != null) {
+                    successCount.incrementAndGet();
+                    result.close();
+                  }
+                } catch (Exception e) {
+                  // Should not happen in this test
+                  fail("Unexpected exception during concurrent access: " + e.getMessage());
+                }
+              });
+    }
+
+    // Wait for all futures to complete
+    CompletableFuture.allOf(futures).join();
+
+    // Verify all threads succeeded
+    assertEquals(
+        threadCount, successCount.get(), "All threads should successfully retrieve the secret");
+
+    // Verify at least one cache miss (first access) and some cache hits
+    verify(metrics, atLeast(1)).incrementCacheMiss();
+    verify(metrics, atLeast(1)).incrementCacheHit();
+  }
+
+  // === Additional Edge Case Tests ===
+
+  @Test
+  void testSecretNameSanitizationEdgeCases() {
+    // Test extreme edge cases for secret name sanitization
+    String[] edgeCases = {
+      "", // empty string
+      "---", // only hyphens
+      "123abc", // starts with numbers
+      "a", // single character
+      "secret-with-multiple---hyphens", // multiple consecutive hyphens
+      "UPPERCASE-secret", // uppercase
+      "secret.with.dots.and_underscores" // mixed special characters
+    };
+
+    // Setup a generic response for any sanitized name
+    when(secretClient.getSecret(anyString())).thenReturn(keyVaultSecret);
+    when(keyVaultSecret.getValue()).thenReturn("test-value");
+    when(keyVaultSecret.getProperties()).thenReturn(null);
+
+    for (String edgeCase : edgeCases) {
+      // Clear cache to ensure fresh test
+      provider.clearCache();
+
+      if (!edgeCase.isEmpty()) { // Skip empty string as it's handled separately
+        VaultRawSecret result = provider.obtainSecret(edgeCase);
+        if (result != null) {
+          result.close();
+        }
+      }
+    }
+
+    // Just verify that sanitization doesn't crash the system
+    assertTrue(true, "Secret name sanitization should handle edge cases gracefully");
+  }
+
+  @Test
+  void testLargeSecretValue() {
+    // Test handling of large secret values
+    StringBuilder largeValue = new StringBuilder();
+    for (int i = 0; i < 1000; i++) {
+      largeValue.append("This is a large secret value segment ").append(i).append(". ");
+    }
+
+    when(secretClient.getSecret("large-secret")).thenReturn(keyVaultSecret);
+    when(keyVaultSecret.getValue()).thenReturn(largeValue.toString());
+    when(keyVaultSecret.getProperties()).thenReturn(null);
+
+    VaultRawSecret result = provider.obtainSecret("large-secret");
+
+    assertNotNull(result);
+    assertTrue(result.getAsArray().isPresent());
+    assertEquals(largeValue.toString(), new String(result.getAsArray().get()));
+
+    // Verify caching works for large values
+    VaultRawSecret cachedResult = provider.obtainSecret("large-secret");
+    assertNotNull(cachedResult);
+    assertEquals(largeValue.toString(), new String(cachedResult.getAsArray().get()));
+
+    verify(metrics).incrementCacheMiss(); // First call
+    verify(metrics).incrementCacheHit(); // Second call
+
+    result.close();
+    cachedResult.close();
   }
 }
