@@ -1,5 +1,10 @@
 package org.devolia.kcvault.provider;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.devolia.kcvault.auth.CredentialResolver;
+import org.devolia.kcvault.cache.CacheConfig;
+import org.devolia.kcvault.metrics.AzureKeyVaultMetrics;
 import org.keycloak.Config;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
@@ -65,9 +70,6 @@ public class AzureKeyVaultProviderFactory implements VaultProviderFactory {
   public VaultProvider create(KeycloakSession session) {
     logger.debug("Creating Azure Key Vault provider instance");
 
-    // TODO: Implement proper CDI integration
-    // For now, create a simple instance that will be enhanced with CDI
-
     // Validate required configuration
     String vaultName = getVaultName();
     if (vaultName == null || vaultName.trim().isEmpty()) {
@@ -75,16 +77,17 @@ public class AzureKeyVaultProviderFactory implements VaultProviderFactory {
           "Azure Key Vault name is required. Please configure 'spi-vault-azure-kv-name' in keycloak.conf");
     }
 
-    // TODO: Create and inject dependencies
-    // CredentialResolver credentialResolver = createCredentialResolver();
-    // CacheConfig cacheConfig = createCacheConfig();
-    // AzureKeyVaultMetrics metrics = createMetrics();
+    try {
+      // Create and inject dependencies
+      CredentialResolver credentialResolver = createCredentialResolver();
+      CacheConfig cacheConfig = createCacheConfig();
+      AzureKeyVaultMetrics metrics = createMetrics();
 
-    // return new AzureKeyVaultProvider(credentialResolver, cacheConfig, metrics);
-
-    // STUB: Return a minimal instance for now
-    logger.warn("STUB: Returning minimal AzureKeyVaultProvider instance");
-    return null; // Will be implemented with proper CDI injection
+      return new AzureKeyVaultProvider(credentialResolver, cacheConfig, metrics);
+    } catch (Exception e) {
+      logger.error("Failed to create Azure Key Vault provider", e);
+      throw new RuntimeException("Failed to create Azure Key Vault provider", e);
+    }
   }
 
   /**
@@ -181,6 +184,53 @@ public class AzureKeyVaultProviderFactory implements VaultProviderFactory {
     return config.getInt(CONFIG_CACHE_MAX, DEFAULT_CACHE_MAX);
   }
 
+  /**
+   * Creates a new CredentialResolver instance.
+   *
+   * @return configured CredentialResolver
+   */
+  private CredentialResolver createCredentialResolver() {
+    logger.debug("Creating CredentialResolver");
+    return new CredentialResolver();
+  }
+
+  /**
+   * Creates a new CacheConfig instance with current configuration.
+   *
+   * @return configured CacheConfig
+   */
+  private CacheConfig createCacheConfig() {
+    String vaultName = getVaultName();
+    int cacheTtl = getCacheTtl();
+    int cacheMaxSize = getCacheMaxSize();
+
+    logger.debug(
+        "Creating CacheConfig with vault: {}, TTL: {}s, max size: {}",
+        vaultName,
+        cacheTtl,
+        cacheMaxSize);
+
+    CacheConfig cacheConfig = new CacheConfig(vaultName, cacheTtl, cacheMaxSize);
+    cacheConfig.validate();
+    return cacheConfig;
+  }
+
+  /**
+   * Creates a new AzureKeyVaultMetrics instance.
+   *
+   * @return configured AzureKeyVaultMetrics
+   */
+  private AzureKeyVaultMetrics createMetrics() {
+    String vaultName = getVaultName();
+    logger.debug("Creating AzureKeyVaultMetrics for vault: {}", vaultName);
+
+    // Create a SimpleMeterRegistry for metrics collection
+    // In a production environment, this could be replaced with a more sophisticated registry
+    MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    return new AzureKeyVaultMetrics(meterRegistry, vaultName);
+  }
+
   /** Validates the configuration and logs warnings for missing optional parameters. */
   private void validateConfiguration() {
     String vaultName = getVaultName();
@@ -188,6 +238,17 @@ public class AzureKeyVaultProviderFactory implements VaultProviderFactory {
       logger.error("Required configuration 'spi-vault-azure-kv-name' is missing or empty");
       throw new IllegalStateException(
           "Azure Key Vault name is required. Please configure 'spi-vault-azure-kv-name' in keycloak.conf");
+    }
+
+    // Validate Azure Key Vault naming rules
+    if (!isValidAzureKeyVaultName(vaultName)) {
+      logger.error(
+          "Invalid Azure Key Vault name: {}. Must be 3-24 characters, alphanumeric and hyphens only",
+          vaultName);
+      throw new IllegalStateException(
+          "Invalid Azure Key Vault name: "
+              + vaultName
+              + ". Must be 3-24 characters, alphanumeric and hyphens only");
     }
 
     int cacheTtl = getCacheTtl();
@@ -201,5 +262,40 @@ public class AzureKeyVaultProviderFactory implements VaultProviderFactory {
     }
 
     logger.info("Azure Key Vault provider configured successfully for vault: {}", vaultName);
+  }
+
+  /**
+   * Validates Azure Key Vault naming rules.
+   *
+   * @param vaultName the vault name to validate
+   * @return true if valid, false otherwise
+   */
+  private boolean isValidAzureKeyVaultName(String vaultName) {
+    if (vaultName == null || vaultName.trim().isEmpty()) {
+      return false;
+    }
+
+    // Azure Key Vault naming rules:
+    // - 3-24 characters
+    // - Alphanumeric and hyphens only
+    // - Must start with letter
+    // - Cannot end with hyphen
+    // - Cannot have consecutive hyphens
+    String trimmedName = vaultName.trim();
+
+    if (trimmedName.length() < 3 || trimmedName.length() > 24) {
+      return false;
+    }
+
+    if (!trimmedName.matches("^[a-zA-Z][a-zA-Z0-9-]*[a-zA-Z0-9]$")) {
+      return false;
+    }
+
+    // Check for consecutive hyphens
+    if (trimmedName.contains("--")) {
+      return false;
+    }
+
+    return true;
   }
 }
