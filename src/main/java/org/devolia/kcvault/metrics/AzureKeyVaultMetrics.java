@@ -40,6 +40,9 @@ public class AzureKeyVaultMetrics {
   private static final String LATENCY_SECONDS = "keycloak_vault_azure_kv_latency_seconds";
   private static final String CACHE_OPERATIONS_TOTAL =
       "keycloak_vault_azure_kv_cache_operations_total";
+  private static final String RETRY_ATTEMPTS_TOTAL = "keycloak_vault_azure_kv_retry_attempts_total";
+  private static final String CIRCUIT_BREAKER_STATE =
+      "keycloak_vault_azure_kv_circuit_breaker_state";
 
   // Status tags
   private static final String STATUS_SUCCESS = "success";
@@ -163,6 +166,73 @@ public class AzureKeyVaultMetrics {
   public void incrementCacheMiss() {
     cacheMissCounter.increment();
     logger.debug("Recorded cache miss");
+  }
+
+  /**
+   * Records an error with specific error category for better monitoring.
+   *
+   * @param latencyNanos the request latency in nanoseconds
+   * @param errorCategory the error category (e.g., "timeout", "authentication", "rate_limited")
+   */
+  public void recordError(long latencyNanos, String errorCategory) {
+    Counter.builder(REQUESTS_TOTAL)
+        .description("Total number of Azure Key Vault requests")
+        .tag("status", "error")
+        .tag("error_category", errorCategory != null ? errorCategory : "unknown")
+        .tag("vault", vaultName)
+        .register(meterRegistry)
+        .increment();
+
+    requestTimer.record(Duration.ofNanos(latencyNanos));
+    logger.debug(
+        "Recorded error vault request - category: {}, latency: {}ms",
+        errorCategory,
+        latencyNanos / 1_000_000);
+  }
+
+  /**
+   * Records a retry attempt.
+   *
+   * @param attemptNumber the attempt number (1, 2, 3, etc.)
+   * @param errorCategory the error category that triggered the retry
+   */
+  public void recordRetryAttempt(int attemptNumber, String errorCategory) {
+    Counter.builder(RETRY_ATTEMPTS_TOTAL)
+        .description("Total number of retry attempts")
+        .tag("attempt", String.valueOf(attemptNumber))
+        .tag("error_category", errorCategory != null ? errorCategory : "unknown")
+        .tag("vault", vaultName)
+        .register(meterRegistry)
+        .increment();
+
+    logger.debug("Recorded retry attempt {} for error category: {}", attemptNumber, errorCategory);
+  }
+
+  /**
+   * Records circuit breaker state changes.
+   *
+   * @param state the circuit breaker state ("closed", "open", "half_open")
+   */
+  public void recordCircuitBreakerState(String state) {
+    meterRegistry.gauge(
+        CIRCUIT_BREAKER_STATE,
+        io.micrometer.core.instrument.Tags.of(
+            "state", state,
+            "vault", vaultName),
+        this,
+        gauge -> getStateValue(state));
+
+    logger.debug("Recorded circuit breaker state change: {}", state);
+  }
+
+  /** Gets a numeric value for circuit breaker state for gauge metric. */
+  private double getStateValue(String state) {
+    return switch (state) {
+      case "closed" -> 0.0;
+      case "half_open" -> 0.5;
+      case "open" -> 1.0;
+      default -> -1.0;
+    };
   }
 
   /**
