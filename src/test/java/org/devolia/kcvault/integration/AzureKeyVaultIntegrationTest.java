@@ -274,8 +274,8 @@ class AzureKeyVaultIntegrationTest extends BaseIntegrationTest {
         String secretValue = secret.get("value").asText();
 
         BlobClient blobClient = containerClient.getBlobClient(secretName);
-        blobClient.upload(
-            new java.io.ByteArrayInputStream(secretValue.getBytes()), secretValue.length(), true);
+        byte[] secretBytes = secretValue.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        blobClient.upload(new java.io.ByteArrayInputStream(secretBytes), secretBytes.length, true);
 
         logger.debug("Created test secret: {}", secretName);
       }
