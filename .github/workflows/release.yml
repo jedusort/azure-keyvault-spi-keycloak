@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+      packages: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: 17
+        distribution: 'temurin'
+    
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: ${{ runner.os }}-m2
+    
+    - name: Extract version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Update version for release
+      run: |
+        mvn versions:set -DnewVersion=${{ steps.version.outputs.VERSION }} -DgenerateBackupPoms=false
+    
+    - name: Build release artifacts
+      run: mvn clean package -DskipTests=false
+    
+    - name: Generate checksums
+      run: |
+        cd target
+        for file in *.jar; do
+          sha256sum "$file" > "$file.sha256"
+        done
+    
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        echo "## 🚀 Azure Key Vault SPI for Keycloak v${{ steps.version.outputs.VERSION }}" > release_notes.md
+        echo "" >> release_notes.md
+        echo "### 📦 Installation" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "#### Maven Dependency" >> release_notes.md
+        echo "\`\`\`xml" >> release_notes.md
+        echo "<dependency>" >> release_notes.md
+        echo "    <groupId>org.devolia</groupId>" >> release_notes.md
+        echo "    <artifactId>azure-keyvault-spi-keycloak</artifactId>" >> release_notes.md
+        echo "    <version>${{ steps.version.outputs.VERSION }}</version>" >> release_notes.md
+        echo "</dependency>" >> release_notes.md
+        echo "\`\`\`" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "#### Direct Download" >> release_notes.md
+        echo "\`\`\`bash" >> release_notes.md
+        echo "# Download JAR" >> release_notes.md
+        echo "wget https://github.com/jedusort/azure-keyvault-spi-keycloak/releases/download/v${{ steps.version.outputs.VERSION }}/azure-keyvault-spi-keycloak-${{ steps.version.outputs.VERSION }}.jar" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "# Verify checksum" >> release_notes.md
+        echo "wget https://github.com/jedusort/azure-keyvault-spi-keycloak/releases/download/v${{ steps.version.outputs.VERSION }}/azure-keyvault-spi-keycloak-${{ steps.version.outputs.VERSION }}.jar.sha256" >> release_notes.md
+        echo "sha256sum -c azure-keyvault-spi-keycloak-${{ steps.version.outputs.VERSION }}.jar.sha256" >> release_notes.md
+        echo "\`\`\`" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "#### Docker Usage" >> release_notes.md
+        echo "\`\`\`dockerfile" >> release_notes.md
+        echo "FROM quay.io/keycloak/keycloak:26.0" >> release_notes.md
+        echo "COPY azure-keyvault-spi-keycloak-${{ steps.version.outputs.VERSION }}.jar /opt/keycloak/providers/" >> release_notes.md
+        echo "RUN /opt/keycloak/bin/kc.sh build" >> release_notes.md
+        echo "\`\`\`" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "### 🔐 Configuration" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "Add to your \`keycloak.conf\`:" >> release_notes.md
+        echo "\`\`\`properties" >> release_notes.md
+        echo "spi-vault-azure-kv-enabled=true" >> release_notes.md
+        echo "spi-vault-azure-kv-name=your-vault-name" >> release_notes.md
+        echo "spi-vault-azure-kv-cache-ttl=60" >> release_notes.md
+        echo "spi-vault-azure-kv-cache-max=1000" >> release_notes.md
+        echo "\`\`\`" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "### 📋 File Checksums" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "| File | SHA256 |" >> release_notes.md
+        echo "|------|--------|" >> release_notes.md
+        cd target
+        for file in *.jar; do
+          checksum=$(cat "$file.sha256" | cut -d' ' -f1)
+          echo "| $file | \`$checksum\` |" >> ../release_notes.md
+        done
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          target/*.jar
+          target/*.jar.sha256
+        body_path: release_notes.md
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        make_latest: true
+        name: "Azure Key Vault SPI for Keycloak v${{ steps.version.outputs.VERSION }}"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Update README badges
+      run: |
+        sed -i 's/Version-.*-blue/Version-${{ steps.version.outputs.VERSION }}-blue/' README.md
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add README.md
+        git commit -m "Update version badge to v${{ steps.version.outputs.VERSION }}" || exit 0
+        git push origin HEAD:main || exit 0

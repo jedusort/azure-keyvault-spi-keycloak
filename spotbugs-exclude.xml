@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Suppress false positives for null pointer warnings in test code -->
+    <Match>
+        <Class name="~.*Test.*" />
+        <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE" />
+    </Match>
+    
+    <!-- Suppress warnings for test utility methods -->
+    <Match>
+        <Class name="~.*Test.*" />
+        <Bug pattern="UWF_UNWRITTEN_FIELD" />
+    </Match>
+    
+    <!-- Suppress serialization warnings for test classes -->
+    <Match>
+        <Class name="~.*Test.*" />
+        <Bug pattern="SE_BAD_FIELD" />
+    </Match>
+    
+    <!-- Suppress warnings for Azure SDK classes that we don't control -->
+    <Match>
+        <Class name="~com\.azure\..*" />
+    </Match>
+</FindBugsFilter>

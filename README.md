@@ -64,15 +64,50 @@ export AZURE_CLIENT_ID="your-client-id"
 export AZURE_CLIENT_SECRET="your-client-secret"
 ```
 
-### 3. Deployment
+### 3. Installation
+
+#### Option A: Maven Dependency (Recommended)
+Add to your `pom.xml`:
+```xml
+<dependency>
+    <groupId>org.devolia</groupId>
+    <artifactId>azure-keyvault-spi-keycloak</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+#### Option B: Direct Download
+```bash
+# Download the latest release
+wget https://github.com/jedusort/azure-keyvault-spi-keycloak/releases/latest/download/azure-keyvault-spi-keycloak-1.0.0.jar
+
+# Download checksum for verification
+wget https://github.com/jedusort/azure-keyvault-spi-keycloak/releases/latest/download/azure-keyvault-spi-keycloak-1.0.0.jar.sha256
+
+# Verify checksum
+sha256sum -c azure-keyvault-spi-keycloak-1.0.0.jar.sha256
+```
+
+#### Option C: GitHub Packages
+If you have access to GitHub Packages, add the repository to your `pom.xml`:
+```xml
+<repositories>
+    <repository>
+        <id>github</id>
+        <url>https://maven.pkg.github.com/jedusort/azure-keyvault-spi-keycloak</url>
+    </repository>
+</repositories>
+```
+
+### 4. Deployment
 
 #### Docker
 ```bash
-# Build the provider JAR
-mvn clean package
+# Using pre-built JAR
+wget https://github.com/jedusort/azure-keyvault-spi-keycloak/releases/latest/download/azure-keyvault-spi-keycloak-1.0.0.jar
 
 # Copy to Keycloak providers directory
-cp target/azure-keyvault-spi-keycloak-*.jar /opt/keycloak/providers/
+cp azure-keyvault-spi-keycloak-*.jar /opt/keycloak/providers/
 
 # Rebuild Keycloak
 /opt/keycloak/bin/kc.sh build
@@ -81,7 +116,22 @@ cp target/azure-keyvault-spi-keycloak-*.jar /opt/keycloak/providers/
 /opt/keycloak/bin/kc.sh start
 ```
 
-### 4. Usage in Keycloak
+#### Dockerfile
+```dockerfile
+FROM quay.io/keycloak/keycloak:26.0
+
+# Download and install the provider
+RUN curl -L https://github.com/jedusort/azure-keyvault-spi-keycloak/releases/latest/download/azure-keyvault-spi-keycloak-1.0.0.jar \
+    -o /opt/keycloak/providers/azure-keyvault-spi-keycloak.jar
+
+# Build Keycloak with the provider
+RUN /opt/keycloak/bin/kc.sh build
+
+# Configure your vault settings
+COPY keycloak.conf /opt/keycloak/conf/
+```
+
+### 5. Usage in Keycloak
 
 Reference secrets in Keycloak configuration using the `${vault.secret-name}` syntax:
 
@@ -92,7 +142,7 @@ smtp-password=${vault.smtp-credentials}
 ldap-bind-credential=${vault.ldap-password}
 ```
 
-### 5. Advanced Usage
+### 6. Advanced Usage
 
 #### Secret Name Mapping
 The provider automatically sanitizes secret names for Azure Key Vault compatibility:
@@ -168,6 +218,41 @@ mvn verify -Pit
 mvn fmt:format
 ```
 
+### Code Quality
+```bash
+# Run static analysis
+mvn spotbugs:check pmd:check
+
+# Run security checks
+mvn dependency-check:check
+```
+
+## 🚀 CI/CD Pipeline
+
+This project uses GitHub Actions for automated CI/CD:
+
+### Automated Testing
+- **Multi-platform testing**: Ubuntu, Windows, macOS
+- **Multi-version support**: Java 17, 21
+- **Comprehensive coverage**: Unit tests + Integration tests with Testcontainers
+- **Code quality**: SpotBugs, PMD, Google Java Style formatting checks
+- **Security scanning**: CodeQL analysis and OWASP dependency checking
+
+### Automated Publishing
+- **GitHub Packages**: Automatic publication on push to main branch
+- **Release artifacts**: JAR files with sources, javadoc, and SHA256 checksums
+- **Version management**: Tag-based releases with automatic changelog generation
+
+### CI/CD Workflows
+- **`ci.yml`**: Runs on every push/PR - testing, quality checks, security scanning
+- **`publish.yml`**: Publishes to GitHub Packages on main branch and tagged releases
+- **`release.yml`**: Creates GitHub releases with artifacts and release notes
+
+### Build Status
+[![CI/CD Pipeline](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/ci.yml/badge.svg)](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/ci.yml)
+[![Publish](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/publish.yml/badge.svg)](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/publish.yml)
+[![Release](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/release.yml/badge.svg)](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/release.yml)
+
 ## 🗺️ Future Roadmap
 
 - [ ] Certificate and key support (beyond secrets)
@@ -194,6 +279,10 @@ Contributions welcome! Please read our contributing guidelines and follow the Go
 - ✅ **Enhanced metrics** - Categorized error tracking and circuit breaker state monitoring
 - ✅ **Comprehensive testing** - Unit tests with >90% coverage and Testcontainers integration
 - ✅ **Production resilience** - Timeout management, jitter, and graceful degradation
+- ✅ **CI/CD Pipeline** - Automated testing, quality checks, and GitHub Packages publication
+- ✅ **Multi-platform support** - Testing on Ubuntu, Windows, and macOS
+- ✅ **Security scanning** - CodeQL analysis and OWASP dependency checking
+- ✅ **Automated releases** - Tag-based releases with artifacts and checksums
 
 ### v1.0.0 (July 2025)
 - ✅ **Initial release** - Core SPI implementation with caching and basic metrics
