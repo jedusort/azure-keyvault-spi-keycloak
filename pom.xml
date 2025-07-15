@@ -95,6 +95,9 @@
         <junit.version>5.11.3</junit.version>
         <mockito.version>5.14.2</mockito.version>
         <testcontainers.version>1.20.3</testcontainers.version>
+        
+        <!-- Security scanning -->
+        <dependency-check.autoUpdate>false</dependency-check.autoUpdate>
     </properties>
 
     <dependencies>
@@ -392,6 +395,17 @@
                 <configuration>
                     <failBuildOnCVSS>8</failBuildOnCVSS>
                     <suppressionFile>owasp-suppress.xml</suppressionFile>
+                    <!-- Optimize for CI/CD performance -->
+                    <nvdValidForHours>24</nvdValidForHours>
+                    <cveValidForHours>24</cveValidForHours>
+                    <format>XML</format>
+                    <!-- Skip auto-update in CI if no API key is available -->
+                    <autoUpdate>${dependency-check.autoUpdate}</autoUpdate>
+                    <!-- Use NVD API key if available -->
+                    <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
+                    <!-- Configure timeouts -->
+                    <connectionTimeout>30000</connectionTimeout>
+                    <readTimeout>60000</readTimeout>
                 </configuration>
             </plugin>
         </plugins>

@@ -253,6 +253,16 @@ This project uses GitHub Actions for automated CI/CD:
 [![Publish](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/publish.yml/badge.svg)](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/publish.yml)
 [![Release](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/release.yml/badge.svg)](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/release.yml)
 
+### Optimizing Security Scanning
+
+To speed up OWASP dependency checking (reduce from 30+ minutes to ~5 minutes), add an NVD API key:
+
+1. Request a free API key at https://nvd.nist.gov/developers/request-an-api-key
+2. Go to repository **Settings** > **Secrets and variables** > **Actions**
+3. Add a new secret named `NVD_API_KEY` with your API key
+
+The pipeline will automatically use the API key if available for faster vulnerability scanning.
+
 ## 🗺️ Future Roadmap
 
 - [ ] Certificate and key support (beyond secrets)

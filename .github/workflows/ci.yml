@@ -95,7 +95,7 @@ jobs:
   security:
     name: Security Analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     # Run in parallel with test job, not dependent on it
     permissions:
       security-events: write
@@ -134,7 +134,12 @@ jobs:
         category: "/language:java"
     
     - name: Run dependency vulnerability scan
-      run: mvn dependency-check:check -DskipTests=true
+      run: mvn dependency-check:check -DskipTests=true -Ddependency-check.autoUpdate=true
+      env:
+        # Use NVD API key if available (helps speed up the process significantly)
+        # To configure: Go to repository Settings > Secrets and variables > Actions
+        # Add a new secret named NVD_API_KEY with your API key from https://nvd.nist.gov/developers/request-an-api-key
+        NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
       continue-on-error: true
 
   build:
