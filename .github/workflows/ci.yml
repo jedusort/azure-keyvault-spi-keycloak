@@ -1,0 +1,222 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test on Java ${{ matrix.java }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        java: [17, 21]
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up JDK ${{ matrix.java }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ matrix.java }}
+        distribution: 'temurin'
+    
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
+    
+    - name: Run unit tests only
+      run: mvn clean test
+      timeout-minutes: 10
+    
+    - name: Upload test results on failure
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: test-results-java-${{ matrix.java }}
+        path: |
+          target/surefire-reports/
+        retention-days: 7
+    
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v4
+      if: matrix.java == '17'
+      with:
+        file: ./target/site/jacoco/jacoco.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  code-quality:
+    name: Code Quality Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Run in parallel with test job, not dependent on it
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: 17
+        distribution: 'temurin'
+    
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
+    
+    - name: Run SpotBugs
+      run: mvn spotbugs:check -DskipTests=true
+      continue-on-error: true
+    
+    - name: Run PMD
+      run: mvn pmd:check -DskipTests=true
+      continue-on-error: true
+    
+    - name: Check code formatting
+      run: mvn fmt:check -DskipTests=true
+
+  security:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Run in parallel with test job, not dependent on it
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: java
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: 17
+        distribution: 'temurin'
+    
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
+    
+    - name: Build for CodeQL
+      run: mvn compile -DskipTests=true
+    
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:java"
+    
+    - name: Run dependency vulnerability scan
+      run: mvn dependency-check:check -DskipTests=true -Ddependency-check.autoUpdate=true
+      env:
+        # Use NVD API key if available (helps speed up the process significantly)
+        # To configure: Go to repository Settings > Secrets and variables > Actions
+        # Add a new secret named NVD_API_KEY with your API key from https://nvd.nist.gov/developers/request-an-api-key
+        NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+      continue-on-error: true
+
+  build:
+    name: Build and Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test, code-quality, security]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: 17
+        distribution: 'temurin'
+    
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
+    
+    - name: Build project
+      run: mvn clean package -DskipTests=true
+    
+    - name: Generate checksums
+      run: |
+        cd target
+        for file in *.jar; do
+          if [[ "$file" != *"sources.jar" && "$file" != *"javadoc.jar" ]]; then
+            sha256sum "$file" > "$file.sha256"
+          fi
+        done
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts
+        path: |
+          target/*.jar
+          target/*.jar.sha256
+        retention-days: 7
+
+  multi-platform:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        java: [17]
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up JDK ${{ matrix.java }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ matrix.java }}
+        distribution: 'temurin'
+    
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
+    
+    - name: Run unit tests only
+      run: mvn test
+    
+    - name: Verify compilation
+      run: mvn compile -DskipTests=true

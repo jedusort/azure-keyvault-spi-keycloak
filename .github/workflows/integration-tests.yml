@@ -1,0 +1,67 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    paths:
+      - 'src/test/java/**/integration/**'
+      - 'src/main/java/**'
+
+jobs:
+  integration-tests:
+    name: Integration Tests (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: 17
+        distribution: 'temurin'
+    
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Pull Docker images in advance
+      run: |
+        docker pull mcr.microsoft.com/azure-storage/azurite:latest
+        docker pull quay.io/keycloak/keycloak:26.0.0
+    
+    - name: Run integration tests
+      run: mvn clean verify -DskipUTs=true
+      timeout-minutes: 35
+      env:
+        TESTCONTAINERS_RYUK_DISABLED: true
+    
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: integration-test-results
+        path: |
+          target/failsafe-reports/
+          target/surefire-reports/
+        retention-days: 7
+    
+    - name: Upload Docker logs on failure
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: docker-logs
+        path: |
+          target/docker-logs/
+        retention-days: 3
