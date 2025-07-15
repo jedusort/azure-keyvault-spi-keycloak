@@ -261,6 +261,13 @@
                         <exclude>**/*IT.java</exclude>
                         <exclude>**/integration/**/*Test.java</exclude>
                     </excludes>
+                    <!-- Configure timeouts to prevent CI hangs -->
+                    <forkedProcessTimeoutInSeconds>300</forkedProcessTimeoutInSeconds>
+                    <forkedProcessExitTimeoutInSeconds>30</forkedProcessExitTimeoutInSeconds>
+                    <!-- System properties to optimize Azure credential resolution in CI -->
+                    <systemPropertyVariables>
+                        <azure.identity.disable.imds>true</azure.identity.disable.imds>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
             
