@@ -1,0 +1,47 @@
+name: Validate Workflows
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  push:
+    paths:
+      - '.github/workflows/**'
+
+jobs:
+  validate-workflows:
+    name: Validate GitHub Actions Workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Validate workflow syntax
+      run: |
+        echo "Validating workflow files..."
+        for workflow in .github/workflows/*.yml; do
+          echo "Checking $workflow"
+          # Basic YAML syntax validation
+          python3 -c "import yaml; yaml.safe_load(open('$workflow'))"
+        done
+        echo "All workflows have valid YAML syntax"
+    
+    - name: Check for common issues
+      run: |
+        echo "Checking for common workflow issues..."
+        
+        # Check for missing timeout-minutes
+        echo "Checking for jobs without timeout-minutes..."
+        if grep -r "jobs:" .github/workflows/ | grep -v timeout-minutes; then
+          echo "Warning: Some jobs may not have timeout-minutes specified"
+        fi
+        
+        # Check for potential security issues
+        echo "Checking for potential security issues..."
+        if grep -r "pull_request_target" .github/workflows/; then
+          echo "Warning: pull_request_target found - ensure proper security measures"
+        fi
+        
+        echo "Validation complete"

@@ -45,6 +45,19 @@
     </distributionManagement>
     
     <repositories>
+        <!-- JBoss Repository for Keycloak dependencies -->
+        <repository>
+            <id>jboss-public</id>
+            <name>JBoss Public Repository</name>
+            <url>https://repository.jboss.org/nexus/content/groups/public/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        
         <repository>
             <id>github</id>
             <url>https://maven.pkg.github.com/jedusort/azure-keyvault-spi-keycloak</url>

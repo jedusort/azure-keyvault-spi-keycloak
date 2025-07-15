@@ -9,6 +9,7 @@ jobs:
   publish:
     name: Publish to GitHub Packages
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     
     permissions:
       contents: read
@@ -28,8 +29,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.m2
-        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-        restore-keys: ${{ runner.os }}-m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
     
     - name: Configure Maven settings
       uses: s4u/maven-settings-action@v3
