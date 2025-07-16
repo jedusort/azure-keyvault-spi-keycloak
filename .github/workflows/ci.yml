@@ -129,9 +129,8 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.m2/repository/org/owasp/dependency-check-data
-        key: nvd-db-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-${{ github.run_number }}
+        key: nvd-db-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
         restore-keys: |
-          nvd-db-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-
           nvd-db-${{ runner.os }}-
     
     - name: Build for CodeQL
