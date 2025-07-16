@@ -153,10 +153,9 @@ public abstract class BaseIntegrationTest {
             .withExposedPorts(8080, 9000) // Expose both main and management ports
             .withEnv(getKeycloakEnvironment())
             .withFileSystemBind(jarPath, "/opt/keycloak/providers/azure-keyvault-spi-keycloak.jar")
+            .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("/bin/bash"))
             .withCommand(
-                "bash",
-                "-c",
-                "/opt/keycloak/bin/kc.sh build && " + "/opt/keycloak/bin/kc.sh start-dev")
+                "-c", "/opt/keycloak/bin/kc.sh build && " + "/opt/keycloak/bin/kc.sh start-dev")
             .waitingFor(
                 Wait.forHttp("/health/ready")
                     .forPort(9000) // Health endpoints are on management port 9000
