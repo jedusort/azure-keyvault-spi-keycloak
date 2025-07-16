@@ -119,12 +119,12 @@ class AzureKeyVaultIntegrationTest extends BaseIntegrationTest {
     logger.info("Testing Keycloak health and metrics endpoints...");
 
     HttpClient client = HttpClient.newHttpClient();
-    String baseUrl = getKeycloakAdminUrl();
+    String managementUrl = getKeycloakManagementUrl();
 
-    // Test health endpoint
+    // Test health endpoint (on management port)
     HttpRequest healthRequest =
         HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + "/health/ready"))
+            .uri(URI.create(managementUrl + "/health/ready"))
             .timeout(Duration.ofSeconds(30))
             .build();
 
@@ -132,10 +132,10 @@ class AzureKeyVaultIntegrationTest extends BaseIntegrationTest {
         client.send(healthRequest, HttpResponse.BodyHandlers.ofString());
     assertEquals(200, healthResponse.statusCode(), "Health endpoint should return 200");
 
-    // Test metrics endpoint
+    // Test metrics endpoint (on management port)
     HttpRequest metricsRequest =
         HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + "/metrics"))
+            .uri(URI.create(managementUrl + "/metrics"))
             .timeout(Duration.ofSeconds(30))
             .build();
 
@@ -322,7 +322,7 @@ class AzureKeyVaultIntegrationTest extends BaseIntegrationTest {
       HttpClient client = HttpClient.newHttpClient();
       HttpRequest request =
           HttpRequest.newBuilder()
-              .uri(URI.create(getKeycloakAdminUrl() + "/health/ready"))
+              .uri(URI.create(getKeycloakManagementUrl() + "/health/ready"))
               .timeout(Duration.ofSeconds(10))
               .build();
 
