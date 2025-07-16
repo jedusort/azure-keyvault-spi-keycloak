@@ -8,8 +8,29 @@
     
     <!-- Suppress false positives for Keycloak dependencies -->
     <suppress>
-        <notes>Keycloak dependencies are provided by the runtime environment</notes>
+        <notes>Keycloak dependencies are provided by the runtime environment and not included in final JAR</notes>
         <packageUrl regex="true">^pkg:maven/org\.keycloak/.*$</packageUrl>
+    </suppress>
+    
+    <!-- Suppress specific CVEs for Keycloak provided dependencies -->
+    <suppress>
+        <notes>CVE-2024-11736: Keycloak common provided by runtime, not packaged</notes>
+        <cve>CVE-2024-11736</cve>
+    </suppress>
+    
+    <suppress>
+        <notes>CVE-2025-7365: Keycloak core provided by runtime, not packaged</notes>
+        <cve>CVE-2025-7365</cve>
+    </suppress>
+    
+    <suppress>
+        <notes>CVE-2024-4028: Keycloak core provided by runtime, not packaged</notes>
+        <cve>CVE-2024-4028</cve>
+    </suppress>
+    
+    <suppress>
+        <notes>CVE-2025-5416: Keycloak core provided by runtime, not packaged</notes>
+        <cve>CVE-2025-5416</cve>
     </suppress>
     
     <!-- Suppress false positives for test-only dependencies -->
