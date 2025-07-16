@@ -264,9 +264,19 @@
                     <!-- Configure timeouts to prevent CI hangs -->
                     <forkedProcessTimeoutInSeconds>300</forkedProcessTimeoutInSeconds>
                     <forkedProcessExitTimeoutInSeconds>30</forkedProcessExitTimeoutInSeconds>
-                    <!-- System properties to optimize Azure credential resolution in CI -->
+                    <!-- System properties to completely disable Azure credential resolution in unit tests -->
                     <systemPropertyVariables>
+                        <!-- Disable all Azure credential providers that could cause hangs -->
                         <azure.identity.disable.imds>true</azure.identity.disable.imds>
+                        <azure.identity.disable.managedidentity>true</azure.identity.disable.managedidentity>
+                        <azure.identity.disable.azurecli>true</azure.identity.disable.azurecli>
+                        <azure.identity.disable.azurepowershell>true</azure.identity.disable.azurepowershell>
+                        <azure.identity.disable.visualstudiocode>true</azure.identity.disable.visualstudiocode>
+                        <azure.identity.disable.intellij>true</azure.identity.disable.intellij>
+                        <!-- Explicitly mark as unit test environment -->
+                        <azure.identity.test.mode>true</azure.identity.test.mode>
+                        <!-- Reduce timeouts for faster failure -->
+                        <azure.identity.timeout>5</azure.identity.timeout>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
