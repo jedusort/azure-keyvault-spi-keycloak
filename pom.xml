@@ -291,6 +291,18 @@
                         <include>**/*IT.java</include>
                         <include>**/integration/**/*Test.java</include>
                     </includes>
+                    <!-- Configure timeouts for integration tests -->
+                    <forkedProcessTimeoutInSeconds>900</forkedProcessTimeoutInSeconds>
+                    <forkedProcessExitTimeoutInSeconds>60</forkedProcessExitTimeoutInSeconds>
+                    <!-- System properties for integration tests - allow Azure credential resolution -->
+                    <systemPropertyVariables>
+                        <!-- Mark as integration test environment -->
+                        <azure.identity.integration.test>true</azure.identity.integration.test>
+                        <!-- Allow longer timeouts for real Azure service connections -->
+                        <azure.identity.timeout>60</azure.identity.timeout>
+                        <!-- Testcontainers configuration -->
+                        <testcontainers.reuse.enable>false</testcontainers.reuse.enable>
+                    </systemPropertyVariables>
                 </configuration>
                 <executions>
                     <execution>
@@ -441,6 +453,25 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <!-- Include integration tests -->
+                            <includes>
+                                <include>**/*IT.java</include>
+                                <include>**/integration/**/*Test.java</include>
+                            </includes>
+                            <!-- Configure timeouts for integration tests -->
+                            <forkedProcessTimeoutInSeconds>900</forkedProcessTimeoutInSeconds>
+                            <forkedProcessExitTimeoutInSeconds>60</forkedProcessExitTimeoutInSeconds>
+                            <!-- System properties for integration tests - allow Azure credential resolution -->
+                            <systemPropertyVariables>
+                                <!-- Mark as integration test environment -->
+                                <azure.identity.integration.test>true</azure.identity.integration.test>
+                                <!-- Allow longer timeouts for real Azure service connections -->
+                                <azure.identity.timeout>60</azure.identity.timeout>
+                                <!-- Testcontainers configuration -->
+                                <testcontainers.reuse.enable>false</testcontainers.reuse.enable>
+                            </systemPropertyVariables>
+                        </configuration>
                         <executions>
                             <execution>
                                 <goals>

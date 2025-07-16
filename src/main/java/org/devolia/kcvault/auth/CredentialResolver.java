@@ -223,39 +223,50 @@ public class CredentialResolver {
   /**
    * Checks if the application is running in a unit test environment.
    *
-   * <p>This method detects test environment indicators to prevent real Azure credential resolution
-   * during unit tests, which could cause timeouts and hangs.
+   * <p>This method detects unit test environment indicators to prevent real Azure credential
+   * resolution during unit tests, which could cause timeouts and hangs. Integration tests are NOT
+   * considered unit tests and should be allowed to connect to Azure services (even if emulated).
    *
-   * @return true if running in a unit test environment
+   * @return true if running in a unit test environment (not integration tests)
    */
   private boolean isInTestMode() {
-    // Check for explicit test mode marker set by Maven Surefire
+    // Check for explicit test mode marker set by Maven Surefire (unit tests only)
     String testMode = System.getProperty("azure.identity.test.mode");
     if ("true".equals(testMode)) {
-      logger.debug("Detected test mode via azure.identity.test.mode system property");
+      logger.debug("Detected unit test mode via azure.identity.test.mode system property");
       return true;
     }
 
-    // Check for JUnit execution environment
-    try {
-      Class.forName("org.junit.jupiter.api.Test");
-      String testClassProperty = System.getProperty("surefire.test.class.path");
-      if (testClassProperty != null) {
-        logger.debug("Detected JUnit test execution environment");
-        return true;
-      }
-    } catch (ClassNotFoundException e) {
-      // JUnit not on classpath, not in test mode
-    }
-
-    // Check for Maven Surefire/Failsafe execution
+    // Check for Maven Surefire execution (unit tests) but NOT Failsafe (integration tests)
     String surefireTest = System.getProperty("surefire.real.class.path");
-    if (surefireTest != null) {
-      logger.debug("Detected Maven Surefire test execution");
+    String failsafeTest = System.getProperty("failsafe.real.class.path");
+
+    if (surefireTest != null && failsafeTest == null) {
+      logger.debug("Detected Maven Surefire (unit test) execution");
       return true;
     }
 
-    logger.debug("No test environment detected");
+    if (failsafeTest != null) {
+      logger.debug(
+          "Detected Maven Failsafe (integration test) execution - allowing normal credential resolution");
+      return false;
+    }
+
+    // Additional check for JUnit execution in Surefire context only
+    if (surefireTest != null) {
+      try {
+        Class.forName("org.junit.jupiter.api.Test");
+        String testClassProperty = System.getProperty("surefire.test.class.path");
+        if (testClassProperty != null) {
+          logger.debug("Detected JUnit unit test execution environment");
+          return true;
+        }
+      } catch (ClassNotFoundException e) {
+        // JUnit not on classpath, not in test mode
+      }
+    }
+
+    logger.debug("No unit test environment detected");
     return false;
   }
 

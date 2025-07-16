@@ -133,7 +133,7 @@ public abstract class BaseIntegrationTest {
     env.put("KEYCLOAK_ADMIN_PASSWORD", KEYCLOAK_ADMIN_PASSWORD);
 
     // Database
-    env.put("KC_DB", "h2-mem");
+    env.put("KC_DB", "dev-mem");
 
     // Health and metrics
     env.put("KC_HEALTH_ENABLED", "true");
