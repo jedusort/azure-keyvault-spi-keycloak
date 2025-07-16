@@ -59,6 +59,9 @@ public abstract class BaseIntegrationTest {
     // Create shared network
     network = Network.newNetwork();
 
+    // Build the SPI JAR first
+    buildSpiJar();
+
     // Setup Azurite container (Azure Storage emulator)
     setupAzuriteContainer();
 
@@ -66,6 +69,45 @@ public abstract class BaseIntegrationTest {
     setupKeycloakContainer();
 
     logger.info("All containers started successfully");
+  }
+
+  /** Builds the SPI JAR before starting containers. */
+  private static void buildSpiJar() {
+    logger.info("Building SPI JAR...");
+
+    try {
+      // Get project root directory
+      String projectRoot = System.getProperty("user.dir");
+      java.nio.file.Path jarPath =
+          java.nio.file.Paths.get(
+              projectRoot, "target", "azure-keyvault-spi-keycloak-1.0.0-SNAPSHOT.jar");
+
+      // Check if JAR already exists and is recent
+      if (java.nio.file.Files.exists(jarPath)) {
+        logger.info("SPI JAR already exists: {}", jarPath);
+        return;
+      }
+
+      // Build the JAR using Maven
+      ProcessBuilder pb = new ProcessBuilder("mvn", "clean", "package", "-DskipTests", "-q");
+      pb.directory(new java.io.File(projectRoot));
+      pb.inheritIO();
+
+      Process process = pb.start();
+      int exitCode = process.waitFor();
+
+      if (exitCode != 0) {
+        throw new RuntimeException("Failed to build SPI JAR, exit code: " + exitCode);
+      }
+
+      if (!java.nio.file.Files.exists(jarPath)) {
+        throw new RuntimeException("SPI JAR not found after build: " + jarPath);
+      }
+
+      logger.info("SPI JAR built successfully: {}", jarPath);
+    } catch (Exception e) {
+      throw new RuntimeException("Failed to build SPI JAR", e);
+    }
   }
 
   /** Sets up the Azurite container for Azure Storage emulation. */
@@ -100,25 +142,34 @@ public abstract class BaseIntegrationTest {
   private static void setupKeycloakContainer() {
     logger.info("Starting Keycloak container...");
 
+    // Get the path to the built JAR
+    String projectRoot = System.getProperty("user.dir");
+    String jarPath = projectRoot + "/target/azure-keyvault-spi-keycloak-1.0.0-SNAPSHOT.jar";
+
     keycloakContainer =
         new GenericContainer<>(DockerImageName.parse(KEYCLOAK_IMAGE))
             .withNetwork(network)
             .withNetworkAliases(KEYCLOAK_NETWORK_ALIAS)
-            .withExposedPorts(8080)
+            .withExposedPorts(8080, 9000) // Expose both main and management ports
             .withEnv(getKeycloakEnvironment())
-            .withCommand("start-dev")
+            .withFileSystemBind(jarPath, "/opt/keycloak/providers/azure-keyvault-spi-keycloak.jar")
+            .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("/bin/bash"))
+            .withCommand(
+                "-c", "/opt/keycloak/bin/kc.sh build && " + "/opt/keycloak/bin/kc.sh start-dev")
             .waitingFor(
                 Wait.forHttp("/health/ready")
-                    .forPort(8080)
-                    .withStartupTimeout(Duration.ofMinutes(5)))
-            .withStartupTimeout(Duration.ofMinutes(5))
+                    .forPort(9000) // Health endpoints are on management port 9000
+                    .withStartupTimeout(Duration.ofMinutes(10))) // Increased timeout for build
+            .withStartupTimeout(Duration.ofMinutes(10))
             .withLogConsumer(new Slf4jLogConsumer(logger).withPrefix("KEYCLOAK"));
 
     keycloakContainer.start();
     logger.info(
-        "Keycloak container started at {}:{}",
+        "Keycloak container started at {}:{} (main) and {}:{} (management)",
         keycloakContainer.getHost(),
-        keycloakContainer.getMappedPort(8080));
+        keycloakContainer.getMappedPort(8080),
+        keycloakContainer.getHost(),
+        keycloakContainer.getMappedPort(9000));
   }
 
   /** Gets the environment variables for Keycloak container configuration. */
@@ -133,7 +184,7 @@ public abstract class BaseIntegrationTest {
     env.put("KEYCLOAK_ADMIN_PASSWORD", KEYCLOAK_ADMIN_PASSWORD);
 
     // Database
-    env.put("KC_DB", "h2-mem");
+    env.put("KC_DB", "dev-mem");
 
     // Health and metrics
     env.put("KC_HEALTH_ENABLED", "true");
@@ -164,6 +215,12 @@ public abstract class BaseIntegrationTest {
   protected String getKeycloakAdminUrl() {
     return String.format(
         "http://%s:%d", keycloakContainer.getHost(), keycloakContainer.getMappedPort(8080));
+  }
+
+  /** Gets the Keycloak management base URL for health and metrics. */
+  protected String getKeycloakManagementUrl() {
+    return String.format(
+        "http://%s:%d", keycloakContainer.getHost(), keycloakContainer.getMappedPort(9000));
   }
 
   /** Gets the Azurite blob service URL for testing. */
