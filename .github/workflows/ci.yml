@@ -95,7 +95,7 @@ jobs:
   security:
     name: Security Analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15  # Reduced from 30 minutes with NVD API key
     # Run in parallel with test job, not dependent on it
     permissions:
       security-events: write
@@ -125,6 +125,15 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-m2-
     
+    - name: Cache NVD Database
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2/repository/org/owasp/dependency-check-data
+        key: nvd-db-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-${{ github.run_number }}
+        restore-keys: |
+          nvd-db-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-
+          nvd-db-${{ runner.os }}-
+    
     - name: Build for CodeQL
       run: mvn compile -DskipTests=true
     
@@ -136,11 +145,12 @@ jobs:
     - name: Run dependency vulnerability scan
       run: mvn dependency-check:check -DskipTests=true -Ddependency-check.autoUpdate=true
       env:
-        # Use NVD API key if available (helps speed up the process significantly)
-        # To configure: Go to repository Settings > Secrets and variables > Actions
-        # Add a new secret named NVD_API_KEY with your API key from https://nvd.nist.gov/developers/request-an-api-key
+        # NVD API key for faster vulnerability database updates
+        # Reduces scan time from 30+ minutes to ~5 minutes
         NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-      continue-on-error: true
+        # Optimize memory usage for dependency check
+        MAVEN_OPTS: "-Xmx2048m -XX:MaxMetaspaceSize=512m"
+      timeout-minutes: 10
 
   build:
     name: Build and Package
