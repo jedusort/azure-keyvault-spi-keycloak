@@ -55,9 +55,9 @@ public class AzureKeyVaultProvider implements VaultProvider {
   private final Cache<String, CachedSecret> secretCache;
   private final AzureKeyVaultMetrics metrics;
   private final String vaultName;
-  private final ResilienceConfig resilienceConfig;
   private final Retry retry;
   private final CircuitBreaker circuitBreaker;
+  private final ResilienceConfig resilienceConfig;
 
   /**
    * Constructor for CDI injection.
@@ -350,6 +350,15 @@ public class AzureKeyVaultProvider implements VaultProvider {
    */
   public long getCacheSize() {
     return secretCache.estimatedSize();
+  }
+
+  /**
+   * Gets the resilience configuration for introspection and monitoring.
+   *
+   * @return the current resilience configuration
+   */
+  public ResilienceConfig getResilienceConfig() {
+    return resilienceConfig;
   }
 
   /**

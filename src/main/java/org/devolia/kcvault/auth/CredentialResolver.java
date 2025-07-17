@@ -6,7 +6,6 @@ import com.azure.identity.DefaultAzureCredentialBuilder;
 import com.azure.identity.ManagedIdentityCredentialBuilder;
 import com.azure.security.keyvault.secrets.SecretClient;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
-import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,9 +42,6 @@ public class CredentialResolver {
   private static final String ENV_AZURE_TENANT_ID = "AZURE_TENANT_ID";
   private static final String ENV_AZURE_CLIENT_ID = "AZURE_CLIENT_ID";
   private static final String ENV_AZURE_CLIENT_SECRET = "AZURE_CLIENT_SECRET";
-
-  // Timeout configuration for credential operations to prevent CI hangs
-  private static final Duration CREDENTIAL_TIMEOUT = Duration.ofSeconds(30);
 
   /**
    * Creates a SecretClient for the specified Azure Key Vault.
@@ -262,7 +258,8 @@ public class CredentialResolver {
           return true;
         }
       } catch (ClassNotFoundException e) {
-        // JUnit not on classpath, not in test mode
+        // JUnit not on classpath, not in test mode - this is expected in production
+        logger.trace("JUnit not available on classpath, not in test environment");
       }
     }
 

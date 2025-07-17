@@ -50,9 +50,9 @@ public class AzureKeyVaultMetrics {
   private static final String STATUS_NOT_FOUND = "not_found";
 
   // Operation tags
-  private static final String OPERATION_GET_SECRET = "get_secret";
   private static final String OPERATION_CACHE_HIT = "cache_hit";
   private static final String OPERATION_CACHE_MISS = "cache_miss";
+  private static final String OPERATION_GET_SECRET = "get_secret";
 
   private final MeterRegistry meterRegistry;
   private final String vaultName;
@@ -131,6 +131,10 @@ public class AzureKeyVaultMetrics {
   public void recordSuccess(long latencyNanos) {
     successCounter.increment();
     requestTimer.record(Duration.ofNanos(latencyNanos));
+
+    // Record detailed operation metric for get_secret
+    recordOperationMetric(OPERATION_GET_SECRET, STATUS_SUCCESS);
+
     logger.debug("Recorded successful vault request (latency: {}ms)", latencyNanos / 1_000_000);
   }
 
@@ -307,5 +311,20 @@ public class AzureKeyVaultMetrics {
     double hits = getCacheHitCount();
     double total = hits + getCacheMissCount();
     return total > 0 ? hits / total : 0.0;
+  }
+
+  /**
+   * Records detailed operation metrics for monitoring specific operations.
+   *
+   * @param operation the operation type (e.g., OPERATION_GET_SECRET)
+   * @param status the operation status
+   */
+  private void recordOperationMetric(String operation, String status) {
+    Counter.builder(REQUESTS_TOTAL)
+        .tag("operation", operation)
+        .tag("status", status)
+        .tag("vault", vaultName)
+        .register(meterRegistry)
+        .increment();
   }
 }
