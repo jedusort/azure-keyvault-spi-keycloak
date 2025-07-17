@@ -1,9 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
-    <!-- Suppress false positives for Azure SDK dependencies -->
+    <!-- Suppress CVE-2023-36415 for azure-identity 1.16.2+ as it was fixed in 1.16.1 -->
+    <suppress>
+        <notes>CVE-2023-36415: Fixed in azure-identity 1.16.1+, false positive in 1.16.2</notes>
+        <packageUrl regex="true">^pkg:maven/com\.azure/azure-identity@1\.16\.2.*$</packageUrl>
+        <cve>CVE-2023-36415</cve>
+    </suppress>
+    
+    <!-- Alternative suppression for the same CVE using filePath if packageUrl doesn't match -->
+    <suppress>
+        <notes>CVE-2023-36415: Fixed in azure-identity 1.16.1+, false positive in 1.16.2</notes>
+        <filePath regex="true">.*azure-identity-1\.16\.2\.jar</filePath>
+        <cve>CVE-2023-36415</cve>
+    </suppress>
+    
+    <!-- Suppress false positives for other Azure SDK dependencies -->
     <suppress>
         <notes>Azure SDK dependencies are regularly updated and monitored by Microsoft</notes>
-        <packageUrl regex="true">^pkg:maven/com\.azure/.*$</packageUrl>
+        <packageUrl regex="true">^pkg:maven/com\.azure/azure-security-keyvault-secrets.*$</packageUrl>
     </suppress>
     
     <!-- Suppress false positives for Keycloak dependencies -->
