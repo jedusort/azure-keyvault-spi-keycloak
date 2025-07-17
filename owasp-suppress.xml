@@ -8,6 +8,13 @@
         <cve>CVE-2023-36415</cve>
     </suppress>
     
+    <!-- Specific suppression for azure-identity 1.16.2 -->
+    <suppress>
+        <notes>CVE-2023-36415: Fixed in azure-identity 1.16.1+, false positive in 1.16.2</notes>
+        <packageUrl>pkg:maven/com.azure/azure-identity@1.16.2</packageUrl>
+        <cve>CVE-2023-36415</cve>
+    </suppress>
+    
     <!-- Alternative suppression using filePath -->
     <suppress>
         <notes>CVE-2023-36415: Fixed in azure-identity 1.16.1+, false positive in 1.16.2+</notes>
@@ -15,17 +22,31 @@
         <cve>CVE-2023-36415</cve>
     </suppress>
     
-    <!-- Suppression using CPE (Common Platform Enumeration) -->
+    <!-- Suppression using CPE 2.3 format (exact match from CI logs) -->
     <suppress>
         <notes>CVE-2023-36415: Fixed in azure-identity 1.16.1+, false positive</notes>
-        <cpe>cpe:/a:microsoft:azure_identity_sdk</cpe>
+        <cpe regex="true">cpe:2\.3:a:microsoft:azure_identity_sdk:1\.16\.[2-9]:.*</cpe>
         <cve>CVE-2023-36415</cve>
     </suppress>
     
-    <!-- Suppression using alternative CPE format -->
+    <!-- Suppression using alternative CPE 2.3 format -->
     <suppress>
         <notes>CVE-2023-36415: Fixed in azure-identity 1.16.1+, false positive</notes>
-        <cpe>cpe:/a:microsoft:azure_sdk_for_java</cpe>
+        <cpe regex="true">cpe:2\.3:a:microsoft:azure_sdk_for_java:1\.16\.[2-9]:.*</cpe>
+        <cve>CVE-2023-36415</cve>
+    </suppress>
+    
+    <!-- Exact CPE 2.3 suppression for 1.16.2 -->
+    <suppress>
+        <notes>CVE-2023-36415: Fixed in azure-identity 1.16.1+, false positive in 1.16.2</notes>
+        <cpe>cpe:2.3:a:microsoft:azure_identity_sdk:1.16.2:*:*:*:*:*:*:*</cpe>
+        <cve>CVE-2023-36415</cve>
+    </suppress>
+    
+    <!-- Exact alternative CPE 2.3 suppression for 1.16.2 -->
+    <suppress>
+        <notes>CVE-2023-36415: Fixed in azure-identity 1.16.1+, false positive in 1.16.2</notes>
+        <cpe>cpe:2.3:a:microsoft:azure_sdk_for_java:1.16.2:*:*:*:*:*:*:*</cpe>
         <cve>CVE-2023-36415</cve>
     </suppress>
     
