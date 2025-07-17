@@ -1,6 +1,7 @@
 package org.devolia.kcvault.auth;
 
 import com.azure.core.credential.TokenCredential;
+import com.azure.core.http.HttpClientOptions;
 import com.azure.identity.ClientSecretCredentialBuilder;
 import com.azure.identity.DefaultAzureCredentialBuilder;
 import com.azure.identity.ManagedIdentityCredentialBuilder;
@@ -44,8 +45,8 @@ public class CredentialResolver {
   private static final String ENV_AZURE_CLIENT_ID = "AZURE_CLIENT_ID";
   private static final String ENV_AZURE_CLIENT_SECRET = "AZURE_CLIENT_SECRET";
 
-  // Timeout configuration for credential operations to prevent CI hangs
-  private static final Duration CREDENTIAL_TIMEOUT = Duration.ofSeconds(30);
+  // Default timeout for credential operations (documented in README)
+  private static final Duration CREDENTIAL_TIMEOUT = Duration.ofSeconds(10);
 
   /**
    * Creates a SecretClient for the specified Azure Key Vault.
@@ -64,7 +65,11 @@ public class CredentialResolver {
     TokenCredential credential = resolveCredential();
 
     SecretClient secretClient =
-        new SecretClientBuilder().vaultUrl(vaultUrl).credential(credential).buildClient();
+        new SecretClientBuilder()
+            .vaultUrl(vaultUrl)
+            .credential(credential)
+            .httpClientOptions(new HttpClientOptions().setResponseTimeout(CREDENTIAL_TIMEOUT))
+            .buildClient();
 
     logger.info("Created SecretClient for vault: {} (URL: {})", vaultName, vaultUrl);
     return secretClient;
@@ -262,7 +267,8 @@ public class CredentialResolver {
           return true;
         }
       } catch (ClassNotFoundException e) {
-        // JUnit not on classpath, not in test mode
+        // JUnit not on classpath, not in test mode - this is expected in production
+        logger.trace("JUnit not available on classpath, not in test environment");
       }
     }
 
