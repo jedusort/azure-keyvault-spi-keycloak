@@ -3,7 +3,7 @@
 [![Java CI](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/ci.yml/badge.svg)](https://github.com/jedusort/azure-keyvault-spi-keycloak/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Coverage](https://img.shields.io/badge/Coverage-90%25-brightgreen.svg)](https://github.com/jedusort/azure-keyvault-spi-keycloak)
-[![Version](https://img.shields.io/badge/Version-1.1.0-blue.svg)](https://github.com/jedusort/azure-keyvault-spi-keycloak/releases)
+[![Version](https://img.shields.io/badge/Version-1.0.0-beta.1-blue.svg)](https://github.com/jedusort/azure-keyvault-spi-keycloak/releases)
 
 Production-ready `VaultProvider` for **Keycloak 26+** that retrieves secrets directly from **Azure Key Vault** using the official Vault SPI.
 
