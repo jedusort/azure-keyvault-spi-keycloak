@@ -78,9 +78,17 @@ public abstract class BaseIntegrationTest {
     try {
       // Get project root directory
       String projectRoot = System.getProperty("user.dir");
+      
+      // Read version from Maven project properties if available
+      String version = System.getProperty("project.version");
+      if (version == null || version.startsWith("${")) {
+        // Fallback to current beta version
+        version = "1.0.0-beta.1";
+      }
+      
       java.nio.file.Path jarPath =
           java.nio.file.Paths.get(
-              projectRoot, "target", "azure-keyvault-spi-keycloak-1.0.0-SNAPSHOT.jar");
+              projectRoot, "target", "azure-keyvault-spi-keycloak-" + version + ".jar");
 
       // Check if JAR already exists and is recent
       if (java.nio.file.Files.exists(jarPath)) {
@@ -144,7 +152,15 @@ public abstract class BaseIntegrationTest {
 
     // Get the path to the built JAR
     String projectRoot = System.getProperty("user.dir");
-    String jarPath = projectRoot + "/target/azure-keyvault-spi-keycloak-1.0.0-SNAPSHOT.jar";
+    
+    // Read version from Maven project properties if available
+    String version = System.getProperty("project.version");
+    if (version == null || version.startsWith("${")) {
+      // Fallback to current beta version
+      version = "1.0.0-beta.1";
+    }
+    
+    String jarPath = projectRoot + "/target/azure-keyvault-spi-keycloak-" + version + ".jar";
 
     keycloakContainer =
         new GenericContainer<>(DockerImageName.parse(KEYCLOAK_IMAGE))
