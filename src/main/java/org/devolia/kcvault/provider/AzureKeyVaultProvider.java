@@ -11,6 +11,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
 import java.time.OffsetDateTime;
+import java.util.Locale;
 import java.util.function.Supplier;
 import org.devolia.kcvault.auth.CredentialResolver;
 import org.devolia.kcvault.cache.CacheConfig;
@@ -122,8 +123,10 @@ public class AzureKeyVaultProvider implements VaultProvider {
           .getEventPublisher()
           .onStateTransition(
               event -> {
-                String fromState = event.getStateTransition().getFromState().name().toLowerCase();
-                String toState = event.getStateTransition().getToState().name().toLowerCase();
+                String fromState =
+                    event.getStateTransition().getFromState().name().toLowerCase(Locale.ROOT);
+                String toState =
+                    event.getStateTransition().getToState().name().toLowerCase(Locale.ROOT);
                 metrics.recordCircuitBreakerState(toState);
                 logger.info(
                     "Circuit breaker state transition: {} -> {} for vault: {}",
@@ -377,7 +380,7 @@ public class AzureKeyVaultProvider implements VaultProvider {
         .replaceAll("[^a-zA-Z0-9-]", "-")
         .replaceAll("-+", "-")
         .replaceAll("^-|-$", "")
-        .toLowerCase();
+        .toLowerCase(Locale.ROOT);
   }
 
   /**

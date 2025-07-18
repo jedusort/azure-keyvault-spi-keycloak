@@ -71,6 +71,48 @@ public abstract class BaseIntegrationTest {
     logger.info("All containers started successfully");
   }
 
+  /**
+   * Resolves the project version from Maven properties or POM file.
+   *
+   * <p>This method attempts to read the version from Maven project properties first, then from the
+   * POM file if needed, and falls back to a default version only if all else fails.
+   *
+   * @return the resolved project version
+   */
+  private static String resolveProjectVersion() {
+    // First try system property (set by Maven during build)
+    String version = System.getProperty("project.version");
+    if (version != null && !version.startsWith("${")) {
+      return version;
+    }
+
+    // Try to read from POM file
+    try {
+      String projectRoot = System.getProperty("user.dir");
+      java.nio.file.Path pomPath = java.nio.file.Paths.get(projectRoot, "pom.xml");
+
+      if (java.nio.file.Files.exists(pomPath)) {
+        String pomContent = java.nio.file.Files.readString(pomPath);
+        java.util.regex.Pattern versionPattern =
+            java.util.regex.Pattern.compile("<version>([^<]+)</version>");
+        java.util.regex.Matcher matcher = versionPattern.matcher(pomContent);
+
+        if (matcher.find()) {
+          String pomVersion = matcher.group(1);
+          if (!pomVersion.startsWith("${")) {
+            return pomVersion;
+          }
+        }
+      }
+    } catch (Exception e) {
+      logger.warn("Failed to read version from POM file", e);
+    }
+
+    // Final fallback - should be avoided in production
+    logger.warn("Using fallback version - consider setting project.version system property");
+    return "1.0.0-beta.1";
+  }
+
   /** Builds the SPI JAR before starting containers. */
   private static void buildSpiJar() {
     logger.info("Building SPI JAR...");
@@ -78,14 +120,8 @@ public abstract class BaseIntegrationTest {
     try {
       // Get project root directory
       String projectRoot = System.getProperty("user.dir");
-      
-      // Read version from Maven project properties if available
-      String version = System.getProperty("project.version");
-      if (version == null || version.startsWith("${")) {
-        // Fallback to current beta version
-        version = "1.0.0-beta.1";
-      }
-      
+      String version = resolveProjectVersion();
+
       java.nio.file.Path jarPath =
           java.nio.file.Paths.get(
               projectRoot, "target", "azure-keyvault-spi-keycloak-" + version + ".jar");
@@ -152,14 +188,7 @@ public abstract class BaseIntegrationTest {
 
     // Get the path to the built JAR
     String projectRoot = System.getProperty("user.dir");
-    
-    // Read version from Maven project properties if available
-    String version = System.getProperty("project.version");
-    if (version == null || version.startsWith("${")) {
-      // Fallback to current beta version
-      version = "1.0.0-beta.1";
-    }
-    
+    String version = resolveProjectVersion();
     String jarPath = projectRoot + "/target/azure-keyvault-spi-keycloak-" + version + ".jar";
 
     keycloakContainer =
