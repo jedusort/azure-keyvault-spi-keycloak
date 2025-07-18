@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,7 +75,7 @@ public class AzureKeyVaultMetrics {
    * @param vaultName the vault name for tagging metrics
    */
   public AzureKeyVaultMetrics(MeterRegistry meterRegistry, String vaultName) {
-    this.meterRegistry = meterRegistry;
+    this.meterRegistry = Objects.requireNonNull(meterRegistry, "meterRegistry cannot be null");
     this.vaultName = vaultName != null ? vaultName : "unknown";
 
     // Initialize counters with base tags
